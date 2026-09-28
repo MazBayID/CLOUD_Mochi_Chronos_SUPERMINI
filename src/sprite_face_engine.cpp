@@ -3,6 +3,11 @@
 #include "generated/face_frames.h"
 #include <esp_system.h> // esp_random(), used to seed Arduino's random()
 
+// Glance offset envelope, one entry per frame tick (~100ms each at 10fps):
+// ease out, hold, hold, hold, ease back -> about half a second in total.
+static const int GLANCE_SCALE_PCT[] = {50, 100, 100, 100, 50};
+static const int GLANCE_STEP_COUNT = sizeof(GLANCE_SCALE_PCT) / sizeof(GLANCE_SCALE_PCT[0]);
+
 void SpriteFaceEngine::begin(Adafruit_SSD1306 *display)
 {
     _display = display;
@@ -26,19 +31,27 @@ void SpriteFaceEngine::scheduleNextShow()
                                                    SPRITE_SHOW_INTERVAL_MAX_MS);
 }
 
+void SpriteFaceEngine::scheduleNextGlance()
+{
+    _nextGlanceAt = millis() + (unsigned long)random(SPRITE_GLANCE_INTERVAL_MIN_MS,
+                                                     SPRITE_GLANCE_INTERVAL_MAX_MS);
+}
+
 void SpriteFaceEngine::resetIdleTimers()
 {
     _state = STATE_RESTING;
     _secondBlinkPending = false;
+    _events = 0;
+    scheduleNextGlance();
     _everDrawn = false; // force a fresh redraw of the resting frame
     scheduleNextBlink();
     scheduleNextShow();
 }
 
-void SpriteFaceEngine::drawFrame(const unsigned char *bitmap)
+void SpriteFaceEngine::drawFrame(const unsigned char *bitmap, int dx, int dy)
 {
     _display->clearDisplay();
-    _display->drawBitmap(SPRITE_X_OFFSET, SPRITE_Y_OFFSET, bitmap,
+    _display->drawBitmap(SPRITE_X_OFFSET + dx, SPRITE_Y_OFFSET + dy, bitmap,
                          FACE_FRAME_W, FACE_FRAME_H, SSD1306_WHITE);
 }
 
@@ -73,12 +86,46 @@ void SpriteFaceEngine::update(bool bleConnected)
             _secondBlinkPending = false;
             _lastFrameAt = now;
             _state = STATE_PLAYING_ANIM;
+            _events |= SPRITE_EV_MOOD;
             changed = true;
         }
         else if (now >= _nextBlinkAt)
         {
             _lastFrameAt = now;
             _state = STATE_BLINKING;
+            _events |= SPRITE_EV_BLINK;
+            changed = true;
+        }
+        else if (now >= _nextGlanceAt)
+        {
+            // pick left / right / up / down
+            _glanceDirX = 0;
+            _glanceDirY = 0;
+            switch (random(0, 4))
+            {
+            case 0: _glanceDirX = -1; break;
+            case 1: _glanceDirX = 1; break;
+            case 2: _glanceDirY = -1; break;
+            default: _glanceDirY = 1; break;
+            }
+            _glanceStep = 0;
+            _lastFrameAt = now;
+            _state = STATE_GLANCING;
+            _events |= SPRITE_EV_GLANCE;
+            changed = true;
+        }
+        break;
+
+    case STATE_GLANCING:
+        if (now - _lastFrameAt >= SPRITE_FRAME_INTERVAL_MS)
+        {
+            _lastFrameAt = now;
+            _glanceStep++;
+            if (_glanceStep >= GLANCE_STEP_COUNT)
+            {
+                _state = STATE_RESTING;
+                scheduleNextGlance();
+            }
             changed = true;
         }
         break;
@@ -119,6 +166,7 @@ void SpriteFaceEngine::update(bool bleConnected)
                 _state = STATE_RESTING;
                 scheduleNextBlink();
                 scheduleNextShow();
+                scheduleNextGlance();
             }
             changed = true;
         }
@@ -132,8 +180,15 @@ void SpriteFaceEngine::update(bool bleConnected)
         return;
 
     const unsigned char *bmp;
+    int ox = 0, oy = 0;
     switch (_state)
     {
+    case STATE_GLANCING:
+        // Ease in/out: half shift, full shift (held), half shift, then back.
+        ox = _glanceDirX * SPRITE_GLANCE_X * GLANCE_SCALE_PCT[_glanceStep] / 100;
+        oy = _glanceDirY * SPRITE_GLANCE_Y * GLANCE_SCALE_PCT[_glanceStep] / 100;
+        bmp = faceAnimFrames[0][0];
+        break;
     case STATE_BLINKING:
         bmp = faceAnimFrames[FACE_BLINK_SET][FACE_BLINK_FRAME];
         break;
@@ -148,7 +203,7 @@ void SpriteFaceEngine::update(bool bleConnected)
         break;
     }
 
-    drawFrame(bmp);
+    drawFrame(bmp, ox, oy);
     drawConnIcon(bleConnected);
     _display->display();
     _everDrawn = true;

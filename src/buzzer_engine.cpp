@@ -46,7 +46,7 @@ void BuzzerEngine::applyStep(const Step &s)
         if (s.freqHz == 0)
             _audio->stopTone();
         else
-            _audio->startTone(s.freqHz);
+            _audio->startTone(s.freqHz, s.gain);
     }
 #endif
 
@@ -55,8 +55,14 @@ void BuzzerEngine::applyStep(const Step &s)
 #endif
 }
 
-void BuzzerEngine::loadPattern(const Step *steps, int count, bool loop)
+void BuzzerEngine::loadPattern(const Step *steps, int count, bool loop, int priority)
 {
+    if (!_enabled || count <= 0)
+        return;
+    // A quieter/less important sound never cuts off a more important one.
+    if (_playing && priority < _currentPriority)
+        return;
+
     if (count > MAX_STEPS)
         count = MAX_STEPS;
     for (int i = 0; i < count; i++)
@@ -64,40 +70,115 @@ void BuzzerEngine::loadPattern(const Step *steps, int count, bool loop)
     _stepCount = count;
     _stepIndex = 0;
     _looping = loop;
-    _playing = _enabled && count > 0;
+    _currentPriority = priority;
+    _playing = true;
     _stepStartedAt = millis();
-    if (_playing)
-        applyStep(_steps[0]);
+    applyStep(_steps[0]);
 }
+
+// ---- ambient face sounds (priority 0-1, muted by the "ALRT" sound mode) ----
+
+void BuzzerEngine::playBlink()
+{
+    if (!_ambientEnabled)
+        return;
+    // tiny soft rising tick: "bl-ink"
+    static const Step p[] = {{2000, 12, 40}, {3600, 18, 40}};
+    loadPattern(p, 2, false, 0);
+}
+
+void BuzzerEngine::playBlup()
+{
+    if (!_ambientEnabled)
+        return;
+    // bubble: quick rise, tiny gap, lower "pop": "bl-up"
+    static const Step p[] = {{650, 18, 60}, {950, 18, 60}, {1350, 22, 60}, {0, 8, 0}, {850, 34, 60}};
+    loadPattern(p, 5, false, 0);
+}
+
+void BuzzerEngine::playBoink()
+{
+    if (!_ambientEnabled)
+        return;
+    // springy sweep up, short gap, bright "k": "boi-nk"
+    static const Step p[] = {{450, 22, 80}, {700, 22, 80}, {1050, 26, 80}, {1500, 22, 80}, {0, 14, 0}, {1200, 40, 80}};
+    loadPattern(p, 6, false, 1);
+}
+
+// ---- alerts ----
 
 void BuzzerEngine::playNotification()
 {
-    // two short rising chirps
-    static const Step pattern[] = {
-        {2400, 70}, {0, 50}, {3100, 90}};
-    loadPattern(pattern, 3, false);
+    // chat message: "beep-beep"
+    static const Step p[] = {{2200, 90, 100}, {0, 70, 0}, {2200, 90, 100}};
+    loadPattern(p, 3, false, 3);
+}
+
+void BuzzerEngine::playCall()
+{
+    // incoming call: three long "beeep"s, then a pause, repeating until
+    // stop() (call answered/ended, or a button press).
+    static const Step p[] = {{2000, 260, 100}, {0, 130, 0}, {2000, 260, 100}, {0, 130, 0}, {2000, 260, 100}, {0, 1200, 0}};
+    loadPattern(p, 6, true, 4);
 }
 
 void BuzzerEngine::playNavigation()
 {
-    static const Step pattern[] = {
-        {1800, 60}};
-    loadPattern(pattern, 1, false);
+    static const Step p[] = {{1800, 60, 100}};
+    loadPattern(p, 1, false, 3);
+}
+
+void BuzzerEngine::playNavTurn(NavTurn turn)
+{
+    switch (turn)
+    {
+    case NAV_TURN_LEFT:
+    { // falling pair: high -> low
+        static const Step p[] = {{1600, 75, 100}, {0, 25, 0}, {1100, 110, 100}};
+        loadPattern(p, 3, false, 3);
+        break;
+    }
+    case NAV_TURN_RIGHT:
+    { // rising pair: low -> high
+        static const Step p[] = {{1100, 75, 100}, {0, 25, 0}, {1600, 110, 100}};
+        loadPattern(p, 3, false, 3);
+        break;
+    }
+    case NAV_TURN_STRAIGHT:
+    { // one steady long beep
+        static const Step p[] = {{1500, 150, 100}};
+        loadPattern(p, 1, false, 3);
+        break;
+    }
+    case NAV_TURN_UTURN:
+    { // zig-zag wobble
+        static const Step p[] = {{1600, 60, 100}, {1300, 60, 100}, {1000, 60, 100}, {1300, 60, 100}, {1600, 80, 100}};
+        loadPattern(p, 5, false, 3);
+        break;
+    }
+    case NAV_TURN_ARRIVE:
+    { // three-note rising "you're here" chime
+        static const Step p[] = {{1200, 80, 100}, {0, 20, 0}, {1600, 80, 100}, {0, 20, 0}, {2100, 160, 100}};
+        loadPattern(p, 5, false, 3);
+        break;
+    }
+    default:
+        playNavigation();
+        break;
+    }
 }
 
 void BuzzerEngine::playClick()
 {
-    static const Step pattern[] = {
-        {2600, 25}, {0, 20}, {3400, 25}};
-    loadPattern(pattern, 3, false);
+    static const Step p[] = {{2600, 25, 100}, {0, 20, 0}, {3400, 25, 100}};
+    loadPattern(p, 3, false, 2);
 }
 
 void BuzzerEngine::playAlarm()
 {
     // urgent repeating two-tone; loops until stop() is called
-    static const Step pattern[] = {
-        {2000, 200}, {0, 80}, {2600, 200}, {0, 200}};
-    loadPattern(pattern, 4, true);
+    static const Step p[] = {{2000, 200, 100}, {0, 80, 0}, {2600, 200, 100}, {0, 200, 0}};
+    loadPattern(p, 4, true, 4);
 }
 
 void BuzzerEngine::stop()
@@ -105,7 +186,9 @@ void BuzzerEngine::stop()
     _playing = false;
     _looping = false;
     _stepCount = 0;
-    applyStep({0, 0});
+    _currentPriority = 0;
+    Step off = {0, 0, 0};
+    applyStep(off);
 }
 
 void BuzzerEngine::loop()

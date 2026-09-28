@@ -91,7 +91,7 @@ void AudioEngine::loop()
     const float twoPiOverRate = 2.0f * (float)PI / (float)TONE_SAMPLE_RATE;
     for (int i = 0; i < TONE_CHUNK_SAMPLES; i++)
     {
-        int16_t s = (int16_t)((float)_toneAmplitude * sinf(_tonePhase));
+        int16_t s = (int16_t)((float)(_toneAmplitude * _toneGain / 100) * sinf(_tonePhase));
         buf[i * 2] = s;
         buf[i * 2 + 1] = s;
         _tonePhase += twoPiOverRate * _toneFreqHz;
@@ -159,10 +159,11 @@ void AudioEngine::setVolume(uint8_t level)
     }
 }
 
-void AudioEngine::startTone(uint16_t freqHz)
+void AudioEngine::startTone(uint16_t freqHz, uint8_t gainPercent)
 {
     if (!_speakerReady)
         return;
+    _toneGain = gainPercent > 100 ? 100 : gainPercent;
     _toneFreqHz = (float)freqHz;
     _toneActive = true;
 }

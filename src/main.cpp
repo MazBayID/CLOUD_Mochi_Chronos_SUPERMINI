@@ -77,6 +77,11 @@ bool spriteActive = false;            // true while spriteFace currently owns th
 
 int qrLinkCount = 0;
 
+bool callRinging = false;              // an incoming call is currently ringing
+unsigned long navCheckAt = 0;          // debounce: evaluate navigation sound at this time
+String navLastKey;                     // last maneuver we already made a sound for
+FaceExpression lastExprForSound = FACE_NORMAL; // to spot expression changes ("boink")
+
 bool prevTouchState = false;
 bool prevAlarmActive = false;
 bool ambientIsSleepy = false;
@@ -91,6 +96,70 @@ void setTransientExpression(FaceExpression expr, unsigned long durationMs)
     face.setExpression(expr);
     transientExprUntil = millis() + durationMs;
     ambientIsSleepy = false;
+}
+
+// ---------- Navigation direction -> sound ----------
+
+static bool textHasAny(const String &text, const char *const *words, int count)
+{
+    for (int i = 0; i < count; i++)
+        if (text.indexOf(words[i]) >= 0)
+            return true;
+    return false;
+}
+
+// Work out which way the next maneuver points. Navigation apps word this
+// differently per language, so match English + Indonesian keywords in the
+// instruction text first; if the text has no direction word (often it's just
+// a street name) fall back to the 48x48 turn icon Chronos sends, using
+// where its lit pixels sit horizontally. Best effort - the result is logged
+// to Serial ("[NAV] turn=...") so it can be tuned against real navigation.
+NavTurn classifyNavTurn(const Navigation &nav)
+{
+    String text = nav.directions + " " + nav.title;
+    text.toLowerCase();
+
+    static const char *const uturn[] = {"u-turn", "u turn", "putar balik", "balik arah"};
+    static const char *const arriveStrong[] = {"arrive", "tiba"};
+    static const char *const left[] = {"left", "kiri"};
+    static const char *const right[] = {"right", "kanan"};
+    static const char *const arriveWeak[] = {"destination", "tujuan"};
+    static const char *const straight[] = {"straight", "lurus", "continue", "terus"};
+
+    if (textHasAny(text, uturn, 4))
+        return NAV_TURN_UTURN;
+    if (textHasAny(text, arriveStrong, 2))
+        return NAV_TURN_ARRIVE;
+    if (textHasAny(text, left, 2))
+        return NAV_TURN_LEFT;
+    if (textHasAny(text, right, 2))
+        return NAV_TURN_RIGHT;
+    if (textHasAny(text, arriveWeak, 2))
+        return NAV_TURN_ARRIVE;
+    if (textHasAny(text, straight, 4))
+        return NAV_TURN_STRAIGHT;
+
+    if (nav.hasIcon)
+    {
+        long sumX = 0, lit = 0;
+        for (int y = 0; y < 48; ++y)
+            for (int x = 0; x < 48; ++x)
+                if ((nav.icon[(y * 48 + x) / 8] >> (7 - (x % 8))) & 0x01)
+                {
+                    sumX += x;
+                    lit++;
+                }
+        if (lit > 20)
+        {
+            float meanX = (float)sumX / (float)lit; // icon center is ~23.5
+            if (meanX < 21.0f)
+                return NAV_TURN_LEFT;
+            if (meanX > 26.0f)
+                return NAV_TURN_RIGHT;
+            return NAV_TURN_STRAIGHT;
+        }
+    }
+    return NAV_TURN_UNKNOWN;
 }
 
 // ---------- Chronos callbacks ----------
@@ -130,8 +199,25 @@ void onNotification(Notification notification)
 
 void onRinger(String caller, bool state)
 {
-    face.setExpression(state ? FACE_SURPRISED : FACE_NORMAL);
     lastActivityMs = millis();
+    if (state)
+    {
+        // incoming call: "beeep-beeep-beeep", repeating until it's
+        // answered/ended (or any button is pressed)
+        face.setExpression(FACE_SURPRISED);
+        callRinging = true;
+        if (menu.buzzerEnabled())
+            buzzer.playCall();
+    }
+    else
+    {
+        face.setExpression(FACE_NORMAL);
+        if (callRinging)
+        {
+            callRinging = false;
+            buzzer.stop();
+        }
+    }
 }
 
 void onConfig(Config config, uint32_t a, uint32_t b)
@@ -147,10 +233,11 @@ void onConfig(Config config, uint32_t a, uint32_t b)
             if (oledReady)
                 ui.goTo(SCR_NAVIGATION);
             setTransientExpression(FACE_CUTE, 3000UL);
-            if (menu.buzzerEnabled())
-                buzzer.playNavigation();
+            navCheckAt = millis() + 500UL; // let the icon finish arriving, then sound once
         } else {
             navigationUntil = 0;
+            navCheckAt = 0;
+            navLastKey = ""; // next navigation session starts fresh
             if (oledReady && ui.current() == SCR_NAVIGATION)
                 ui.backToFace();
         }
@@ -159,6 +246,7 @@ void onConfig(Config config, uint32_t a, uint32_t b)
     case CF_NAV_ICON:
         // The library assembles the 48x48 icon in its Navigation object.
         if (watch.getNavigation().active ) {
+            navCheckAt = millis() + 500UL;
             navigationUntil = millis() + 9000UL;
             if (oledReady)
                 ui.goTo(SCR_NAVIGATION);
@@ -358,7 +446,8 @@ void loop()
     // specific one - three tiny touch buttons isn't enough for a dedicated
     // "dismiss" control, and reacting to whichever one is pressed first is
     // the least surprising behaviour at 3am.
-    if (prevAlarmActive && (talkEv != BTN_NONE || nextEv != BTN_NONE || modeEv != BTN_NONE))
+    if ((prevAlarmActive || callRinging) &&
+        (talkEv != BTN_NONE || nextEv != BTN_NONE || modeEv != BTN_NONE))
         buzzer.stop();
 
     bool inMenu = oledReady && ui.current() == SCR_MENU;
@@ -445,6 +534,27 @@ void loop()
     }
     prevAlarmActive = alarmActive;
 
+    // Navigation direction sound: play once per new maneuver (its turn icon
+    // or instruction changed), not on every distance update.
+    if (navCheckAt && millis() >= navCheckAt)
+    {
+        navCheckAt = 0;
+        Navigation nav = watch.getNavigation();
+        if (nav.active)
+        {
+            String key = nav.directions + "|" + String((unsigned long)nav.iconCRC);
+            if (key != navLastKey)
+            {
+                navLastKey = key;
+                NavTurn turn = classifyNavTurn(nav);
+                Serial.printf("[NAV] turn=%d (0=?,1=L,2=R,3=straight,4=U,5=arrive) dir=\"%s\"\n",
+                              (int)turn, nav.directions.c_str());
+                if (menu.buzzerEnabled())
+                    buzzer.playNavTurn(turn);
+            }
+        }
+    }
+
     if (oledReady)
     {
         // Navigation has priority over the normal UI cycle while active.
@@ -459,6 +569,18 @@ void loop()
             notificationUntil = 0;
             ui.backToFace();
             face.setExpression(FACE_NORMAL);
+        }
+
+        // "boink" whenever the face changes to a named expression (Happy,
+        // Surprised, Cute, ...) while it's actually on screen. Returning to
+        // NORMAL, the quiet-hours/idle Sleepy drift, and changes that
+        // happen while another screen is showing stay silent.
+        FaceExpression exprNow = face.getExpression();
+        if (exprNow != lastExprForSound)
+        {
+            if (ui.current() == SCR_FACE && exprNow != FACE_NORMAL && !ambientIsSleepy)
+                buzzer.playBoink();
+            lastExprForSound = exprNow;
         }
 
         if (ui.current() == SCR_FACE)
@@ -499,6 +621,17 @@ void loop()
                     spriteActive = true;
                 }
                 spriteFace.update(bleConnected);
+
+                // Face sound effects (muted by Sound = ALRT/OFF in the menu):
+                // a full mood animation starting is an expression change
+                // ("boink"), a glance is "blup", a blink is "blink".
+                uint8_t ev = spriteFace.takeEvents();
+                if (ev & SPRITE_EV_MOOD)
+                    buzzer.playBoink();
+                else if (ev & SPRITE_EV_GLANCE)
+                    buzzer.playBlup();
+                else if (ev & SPRITE_EV_BLINK)
+                    buzzer.playBlink();
             }
             else
             {
