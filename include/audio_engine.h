@@ -1,0 +1,51 @@
+#ifndef AUDIO_ENGINE_H
+#define AUDIO_ENGINE_H
+
+#include <Arduino.h>
+
+// Wrapper around the shared I2S bus (INMP441 mic + MAX98357A amp).
+//
+// Two independent things live here:
+//  1. The full mic+speaker voice pipeline (push-to-talk / TTS, a future
+//     milestone) - only compiled/active when ENABLE_AUDIO=1, deliberately
+//     isolated so an untested wiring/driver issue on that side can never
+//     take down the OLED/Chronos base.
+//  2. A simple, always-available "beep out of the existing speaker" path
+//     (startTone/stopTone), used by BuzzerEngine for notification/nav/
+//     alarm sounds. This only ever touches the I2S TX (speaker) side - the
+//     mic pin is never configured unless ENABLE_AUDIO=1 - and it renders
+//     audio in small non-blocking chunks from loop(), so a long alarm
+//     pattern never stalls BLE/button handling the way a single big
+//     blocking write would.
+class AudioEngine
+{
+public:
+    void begin();
+    void loop(); // call every loop(); also advances any in-progress tone
+    bool isEnabled() const; // true once ENABLE_AUDIO's full mic+speaker path is up
+
+    // placeholders for the next milestone (push-to-talk streaming, TTS playback)
+    void startListening();
+    void stopListening();
+    void playTone(uint16_t freqHz, uint16_t durationMs); // blocking, ENABLE_AUDIO-only
+
+    // non-blocking continuous tone out of the speaker, used by BuzzerEngine.
+    // Safe to call even with ENABLE_AUDIO=0 - a speaker-only I2S TX path is
+    // always installed in begin() regardless of that flag.
+    void startTone(uint16_t freqHz);
+    void stopTone();
+
+    // 0=low, 1=med, 2=high - see BEEP_VOLUME_* in dirgamochi_config.h
+    void setVolume(uint8_t level);
+
+private:
+    bool _inited = false;      // full mic+speaker pipeline (ENABLE_AUDIO) is up
+    bool _speakerReady = false; // *some* I2S TX path (speaker-only or full) is up
+
+    bool _toneActive = false;
+    float _tonePhase = 0.0f;
+    float _toneFreqHz = 0.0f;
+    int _toneAmplitude = 5000; // overwritten by setVolume(); see .cpp for the level table
+};
+
+#endif // AUDIO_ENGINE_H
