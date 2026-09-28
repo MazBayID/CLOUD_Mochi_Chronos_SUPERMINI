@@ -3,6 +3,12 @@
 
 #include <Adafruit_SSD1306.h>
 
+// Things that happened during update() that deserve a sound; main.cpp
+// polls them with takeEvents() so this class stays audio-agnostic.
+#define SPRITE_EV_BLINK 0x01  // eyes blinked (also fires for the 2nd blink of a double-blink)
+#define SPRITE_EV_GLANCE 0x02 // eyes glanced left/right/up/down
+#define SPRITE_EV_MOOD 0x04   // a full mood animation just started
+
 // Plays the bitmap "idle mood" animations converted at build time from
 // assets/faces/mochi_*.zip by tools/generate_faces.py (see
 // include/generated/face_frames.h). This only ever owns the OLED during
@@ -19,7 +25,9 @@
 //   2. Every few seconds, blink (one real "eyes closed" frame from the mood
 //      loops, FACE_BLINK_* in the generated header), sometimes twice in a
 //      row like a real double-blink - snappy, not the full ~17s loop.
-//   3. Every so often (much rarer), play one full, randomly chosen ~17s
+//   3. Every several seconds, glance left/right/up/down (the whole face
+//      image slides a few pixels - the frames are baked bitmaps).
+//   4. Every so often (much rarer), play one full, randomly chosen ~17s
 //      mood animation as a little surprise, then return to resting.
 // All timing is non-blocking (millis()-driven) - nothing here ever calls
 // delay(), matching the rest of the firmware's loop() style.
@@ -35,11 +43,20 @@ public:
     // it regains the screen.
     void resetIdleTimers();
 
+    // Returns (and clears) the SPRITE_EV_* bits raised since the last call.
+    uint8_t takeEvents()
+    {
+        uint8_t e = _events;
+        _events = 0;
+        return e;
+    }
+
 private:
     enum State
     {
         STATE_RESTING,
         STATE_BLINKING,
+        STATE_GLANCING,
         STATE_PLAYING_ANIM
     };
 
@@ -51,15 +68,22 @@ private:
     unsigned long _lastFrameAt = 0;
     unsigned long _nextBlinkAt = 0;
     unsigned long _nextShowAt = 0;
+    unsigned long _nextGlanceAt = 0;
+
+    uint8_t _events = 0;
+    int _glanceDirX = 0; // -1/0/+1
+    int _glanceDirY = 0; // -1/0/+1
+    int _glanceStep = 0;
 
     bool _secondBlinkPending = false; // a double-blink's follow-up is queued
     int _animSet = 0;
     int _animFrame = 0;
 
-    void drawFrame(const unsigned char *bitmap);
+    void drawFrame(const unsigned char *bitmap, int dx = 0, int dy = 0);
     void drawConnIcon(bool connected);
     void scheduleNextBlink();
     void scheduleNextShow();
+    void scheduleNextGlance();
 };
 
 #endif // SPRITE_FACE_ENGINE_H

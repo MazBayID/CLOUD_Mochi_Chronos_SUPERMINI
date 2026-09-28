@@ -36,7 +36,11 @@ public:
     bool isShowingDetail() const { return _showingDetail; }
     void closeDetail() { _showingDetail = false; }
 
-    bool buzzerEnabled() const { return _buzzerEnabled; }
+    // Sound mode (menu item "Sound"): 0 = OFF, 1 = ALRT (message / call /
+    // navigation / alarm only), 2 = ALL (alerts + face effects: blink,
+    // blup, boink).
+    bool buzzerEnabled() const { return _soundMode >= 1; } // alerts on
+    bool ambientEnabled() const { return _soundMode >= 2; } // face effects on
     uint8_t oledRotation() const { return _oledRotation; }
 
 private:
@@ -46,7 +50,7 @@ private:
     Preferences _prefs;
 
     int _selected = 0;
-    bool _buzzerEnabled = true;
+    uint8_t _soundMode = 2; // 0=OFF, 1=ALRT, 2=ALL
     uint8_t _oledRotation = 2;
     uint8_t _volumeLevel = 1; // 0=low,1=med,2=high
     bool _showingDetail = false;

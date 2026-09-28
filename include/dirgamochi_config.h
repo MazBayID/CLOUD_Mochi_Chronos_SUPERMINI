@@ -26,7 +26,7 @@
 #endif
 
 #define DIRGA_FW_NAME "Dirgamochi-C3"
-#define DIRGA_FW_VERSION "0.5.0-DIAG"
+#define DIRGA_FW_VERSION "0.5.1-DIAG"
 #define DIRGA_BLE_NAME "Dirgamochi"
 
 // ---------- OLED (SSD1306 128x64, I2C) ----------
@@ -122,6 +122,14 @@
 // Set both to a tiny value (e.g. 100) to play mood loops back to back.
 #define SPRITE_SHOW_INTERVAL_MIN_MS 20000UL
 #define SPRITE_SHOW_INTERVAL_MAX_MS 45000UL
+
+// Occasional glance left/right/up/down while resting. The mood frames are
+// baked bitmaps, so a "glance" slides the whole face image by a few pixels
+// (with a short ease in/out) and plays the "blup" sound.
+#define SPRITE_GLANCE_INTERVAL_MIN_MS 6000UL
+#define SPRITE_GLANCE_INTERVAL_MAX_MS 14000UL
+#define SPRITE_GLANCE_X 5 // px shifted for left/right
+#define SPRITE_GLANCE_Y 3 // px shifted for up/down (edges are black, so it just clips)
 
 // 98px-wide art centered on the 128px-wide OLED; the leftover right margin
 // (x >= 113) is where the BLE status dot lives, so nothing overlaps.

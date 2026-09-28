@@ -32,7 +32,9 @@ public:
     // non-blocking continuous tone out of the speaker, used by BuzzerEngine.
     // Safe to call even with ENABLE_AUDIO=0 - a speaker-only I2S TX path is
     // always installed in begin() regardless of that flag.
-    void startTone(uint16_t freqHz);
+    // gainPercent scales the current volume level (100 = full level), so
+    // quiet ambient sounds can sit under alerts without a separate volume.
+    void startTone(uint16_t freqHz, uint8_t gainPercent = 100);
     void stopTone();
 
     // 0=low, 1=med, 2=high - see BEEP_VOLUME_* in dirgamochi_config.h
@@ -45,6 +47,7 @@ private:
     bool _toneActive = false;
     float _tonePhase = 0.0f;
     float _toneFreqHz = 0.0f;
+    int _toneGain = 100;
     int _toneAmplitude = 5000; // overwritten by setVolume(); see .cpp for the level table
 };
 

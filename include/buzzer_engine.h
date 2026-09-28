@@ -4,62 +4,83 @@
 #include <Arduino.h>
 #include "audio_engine.h"
 
-// Non-blocking sequencer for short beep patterns (notification/nav/alarm/
-// menu-click). Renders each pattern to whichever sound output is actually
-// wired on the board:
-//   - ENABLE_SPEAKER_BEEP (default ON): the existing MAX98357A speaker,
-//     via AudioEngine's non-blocking I2S tone (no separate hardware
-//     needed - this is the path most boards built from the reference
-//     pinout actually have).
-//   - ENABLE_BUZZER (default OFF): an optional separate passive piezo on
-//     BUZZER_PIN, for boards that have one wired in addition.
-// Both can be enabled at once; play*() is a no-op wherever the
-// corresponding flag is off, so this never assumes hardware that isn't
-// there. Nothing here ever calls delay().
+// Direction cue for navigation sounds (see playNavTurn()).
+enum NavTurn
+{
+    NAV_TURN_UNKNOWN = 0,
+    NAV_TURN_LEFT,
+    NAV_TURN_RIGHT,
+    NAV_TURN_STRAIGHT,
+    NAV_TURN_UTURN,
+    NAV_TURN_ARRIVE
+};
+
+// Non-blocking sequencer for short sound patterns. Renders each pattern to
+// whichever output is wired on the board:
+//   - ENABLE_SPEAKER_BEEP (default ON): the MAX98357A speaker, via
+//     AudioEngine's non-blocking I2S tone.
+//   - ENABLE_BUZZER (default OFF): an optional separate passive piezo.
+// Nothing here ever calls delay().
+//
+// Sounds have a priority. A new sound only interrupts the one currently
+// playing if its priority is >= the current one, so a tiny ambient "blink"
+// tick can never cut off a notification, a call ring or an alarm:
+//   0 ambient (blink, blup)   1 expression change (boink)   2 menu click
+//   3 alerts (message, navigation)                          4 call / alarm
 class BuzzerEngine
 {
 public:
     void begin(AudioEngine *audio = nullptr);
     void loop(); // call every loop(); advances any in-progress pattern
 
-    void setEnabled(bool enabled); // master on/off (from settings menu)
+    void setEnabled(bool enabled); // master on/off: alerts + everything
     bool isEnabled() const { return _enabled; }
 
+    // Ambient effects (blink / blup / boink) can be muted separately while
+    // alerts (message, call, navigation, alarm) stay on.
+    void setAmbientEnabled(bool enabled) { _ambientEnabled = enabled; }
+
     // 0=low, 1=med, 2=high - forwarded to AudioEngine (the speaker path);
-    // the optional GPIO3 piezo has no meaningful volume control, so this
-    // only affects ENABLE_SPEAKER_BEEP output.
+    // the optional GPIO3 piezo has no meaningful volume control.
     void setVolume(uint8_t level);
 
-    // short chirp for an incoming notification
-    void playNotification();
-    // single short beep, e.g. a new turn/navigation update
-    void playNavigation();
-    // two quick low-high beeps, e.g. entering/selecting a menu item
-    void playClick();
-    // repeating urgent pattern, e.g. an active alarm - call stop() to silence
-    void playAlarm();
+    // --- ambient (face) sounds ---
+    void playBlink(); // eyes blink: tiny soft tick
+    void playBlup();  // eyes glance left/right/up/down: bubble "blup"
+    void playBoink(); // expression change: springy "boink"
+
+    // --- alerts ---
+    void playNotification(); // chat message: "beep-beep"
+    void playCall();         // incoming call: "beeep-beeep-beeep", repeats until stop()
+    void playNavTurn(NavTurn turn); // navigation direction cue
+    void playNavigation();   // generic single beep (unknown direction)
+    void playClick();        // menu navigation
+    void playAlarm();        // repeating urgent pattern until stop()
     void stop();
 
 private:
     struct Step
     {
-        uint16_t freqHz; // 0 = silence
+        uint16_t freqHz;     // 0 = silence
         uint16_t durationMs;
+        uint8_t gain;        // 0-100, % of the current volume level
     };
 
-    static const int MAX_STEPS = 8;
+    static const int MAX_STEPS = 12;
     Step _steps[MAX_STEPS];
     int _stepCount = 0;
     int _stepIndex = 0;
     unsigned long _stepStartedAt = 0;
     bool _playing = false;
-    bool _looping = false; // true only for playAlarm()
+    bool _looping = false;
+    int _currentPriority = 0;
 
     bool _enabled = true;
+    bool _ambientEnabled = true;
     bool _hwReady = false;
     AudioEngine *_audio = nullptr;
 
-    void loadPattern(const Step *steps, int count, bool loop);
+    void loadPattern(const Step *steps, int count, bool loop, int priority);
     void applyStep(const Step &s);
 };
 
