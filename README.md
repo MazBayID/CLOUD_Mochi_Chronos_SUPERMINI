@@ -1,4 +1,4 @@
-# Dirgamochi-C3 🍡
+# Mochi-C3 🍡
 
 A DasaiMochi-style companion firmware for the **ESP32-C3 Super Mini**, with
 original round "kawaii" eyes (no rectangular DasaiMochi eyes) and a BLE data
