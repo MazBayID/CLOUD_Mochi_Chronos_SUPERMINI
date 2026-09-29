@@ -166,7 +166,7 @@ def generate_faces():
         return
 
     zpaths = [os.path.join(FACES_DIR, z) for z in zips]
-    if is_up_to_date([FACE_OUT_SOURCE, FACE_OUT_HEADER], zpaths + [os.path.abspath(__file__)]):
+    if is_up_to_date([FACE_OUT_SOURCE, FACE_OUT_HEADER], zpaths + [os.path.abspath("tools/generate_assets.py")]):
         log("face sources are up to date - skipping (use --force to rebuild)")
         return
 
