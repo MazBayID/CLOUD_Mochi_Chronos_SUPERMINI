@@ -7,6 +7,7 @@
 .vscode/ipch
 .DS_Store
 *.bin
-# generated at build time from assets/faces/*.zip by tools/generate_faces.py
+# generated at build time from assets/{faces,audio,misc}/* by tools/generate_assets.py
 include/generated/
 src/generated/
+__pycache__/

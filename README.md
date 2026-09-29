@@ -1,10 +1,10 @@
-# Mochi-C3 🍡
+# Dirgamochi-C3 🍡
 
 A DasaiMochi-style companion firmware for the **ESP32-C3 Super Mini**, with
 original round "kawaii" eyes (no rectangular DasaiMochi eyes) and a BLE data
 link to the **Chronos** phone app, using [fbiego/chronos-esp32](https://github.com/fbiego/chronos-esp32).
 
-Chronos supplies time,
+This is **not** a Xiaozhi/voice-assistant clone. Chronos supplies time,
 weather, notifications, navigation, music and phone-battery data over BLE;
 Dirgamochi owns the OLED face, a small piezo buzzer, and the three physical
 touch buttons. Voice (INMP441 mic + MAX98357A amp) is wired in and the
@@ -71,54 +71,111 @@ The face is no longer static between events:
 - A small connection dot (filled = paired, hollow = advertising) sits in
   the top-right corner.
 
-### Bitmap idle moods (assets/faces/*.zip)
+### Bitmap idle moods (assets/faces/*.zip + assets/audio/mochi_voices.zip)
 
 When nothing else is going on (plain idle), the OLED shows a 98x64 bitmap
-face instead of the procedural eyes:
+face instead of the procedural eyes, each mood animation paired with a
+recorded voice clip (IMA ADPCM, 16kHz mono) that starts together with its
+first frame:
 
 - **Rests** on a neutral frame (no redraw while nothing changes, so it
   costs almost no I2C/CPU time).
 - **Blinks** every 2.5-5.5s using a real "eyes closed" frame lifted from
-  the animations, sometimes twice in a row (double-blink).
-- Every 20-45s it plays one **randomly chosen full mood animation**
-  (~17s at 10fps: dizzy eyes, heart eyes, alert triangle eyes, content
-  squint, ...) then returns to rest.
+  the animations, held ~0.4s to match the recorded blink sound, sometimes
+  twice in a row (double-blink - the sound only plays on the first one, so
+  it doesn't repeat awkwardly).
+- Every 20-45s it plays one **randomly chosen full mood animation** (length
+  varies per mood, 71-167 frames at 10fps) together with that mood's own
+  voice clip, then returns to rest.
+- Occasionally **glances** left/right/up/down (the whole image slides a
+  few pixels) with the synthetic "blup" tone - there's no recorded clip
+  for this one.
 
 Every named expression - Happy on BLE connect, Surprised on
-notification/alarm/find-phone, Cute on nav/music, Sleepy in quiet hours or
-after the idle timeout, the "petting" reaction - stays on the procedural
-face above, unchanged, and hands back to the bitmap face afterwards.
-Timings/FPS are tunable in `dirgamochi_config.h` (`SPRITE_*`). To make the
-moods play back-to-back nonstop, set both `SPRITE_SHOW_INTERVAL_*` values
-to something tiny.
+notification/alarm/find-phone, Cute on nav/music, the "petting" reaction -
+stays on the procedural face below, unchanged, and hands back to the
+bitmap face afterwards. Quiet hours / the idle timeout show the sleep
+logo instead (see below), not the bitmap face. Timings/FPS are tunable in
+`dirgamochi_config.h` (`SPRITE_*`).
+
+**Voice clips:** each `mochi_faces/mochi_N.zip` mood has a matching
+`mochi_00N.wav` in `assets/audio/mochi_voices.zip`, rendered to the same
+length as its animation at 10fps. AudioEngine decodes IMA ADPCM itself in
+`loop()`, streaming small non-blocking chunks to the MAX98357A (same
+approach as the tone generator) - nothing is pre-decoded to PCM in flash,
+since ADPCM is already ~4x smaller. Voice clips share the tone generator's
+priority system (see "Sound effects" below): a message/call/nav alert
+still cuts off a mood or blink clip that's mid-playback. If a mood has no
+matching clip (or the blink clip is missing), it falls back to the
+synthetic "boink"/"blink" tone so nothing goes silent.
 
 **How the assets get into the firmware:** the repo keeps only the small
-PNG zips (`assets/faces/mochi_0.zip` ... `mochi_9.zip`, ~3.3MB total).
-`tools/generate_faces.py` converts every frame to a 1-bit dithered bitmap
-and writes `src/generated/face_frames.cpp` + `include/generated/face_frames.h`
-(~1.4MB of flash; git-ignored, never committed). It runs automatically
-before every `pio run` (via `extra_scripts` in `platformio.ini`) and as an
-explicit "Extract face animations" step in the GitHub Actions workflow
-before compiling. It only regenerates when a zip or the script changed.
-To swap in new animations, just replace the zips (each `mochi_N.zip` holds
-numbered PNGs; keep 98x64) and push. Requires Python + Pillow
-(`pip install pillow`; PlatformIO installs it on demand).
+source files - `assets/faces/mochi_0.zip` .. `mochi_9.zip` (PNG frames,
+any subfolder depth, ~2.5MB), `assets/audio/mochi_voices.zip` (the WAVs,
+~530KB), and `assets/misc/sleep_logo.png`. `tools/generate_assets.py`
+converts all three into `src/generated/*.cpp` + `include/generated/*.h`
+(~2MB of flash combined; git-ignored, never committed). It runs
+automatically before every `pio run` (via `extra_scripts` in
+`platformio.ini`) and as an explicit "Extract face/audio/logo assets" step
+in the GitHub Actions workflow before compiling, and only regenerates
+when its inputs changed. To swap in new animations/voices, replace the
+zips (each face zip: numbered PNGs, keep 98x64; the audio zip:
+`mochi_001.wav`..`mochi_0NN.wav` in mood order + `mochi_blink.wav`, IMA
+ADPCM/WAV tag 0x11/mono/16kHz) and push. Requires Python + Pillow
+(`pip install pillow`; PlatformIO installs it on demand) - the audio
+conversion itself only needs the standard library.
+
+### Sleep logo (assets/misc/sleep_logo.png)
+
+While ambient-sleepy (Chronos quiet hours/sleep schedule, or the idle
+timeout - see below), the OLED shows a static full-panel logo instead of
+any face, painted once (not redrawn every tick, since it never changes)
+and cleared the moment something else needs the screen. Swap
+`assets/misc/sleep_logo.png` for your own image and push - it's
+letterboxed to fit 128x64 preserving aspect ratio (composited onto black
+first, so transparent areas become "off" pixels) and dithered to 1-bit,
+same as the face frames. Fine detail gets rough at this resolution; a
+bold, high-contrast source works best.
 
 ### Ambient behaviour (quiet hours / idle / touch)
 
 - If Chronos reports its **quiet hours** or **sleep schedule** as active,
-  the face settles into the Sleepy expression and wakes back up once
+  the OLED shows the sleep logo above and wakes back up once
   those hours end.
 - With no button press, notification or navigation for
   `IDLE_SLEEPY_TIMEOUT_MS` (5 minutes by default, see
-  `dirgamochi_config.h`), the face drifts to Sleepy on its own and wakes on
-  the next touch or event.
+  `dirgamochi_config.h`), the sleep logo takes over on its own and the face
+  resumes on the next touch or event.
 - If the Chronos app relays a **remote touch** (`RemoteTouch`, already
   present in the vendored library but previously unused), the eyes look
   toward the touched point, and releasing gives a brief Happy "petting"
   reaction. This depends on the Chronos app actually sending touch data for
   this screen profile — treat it as experimental and confirm on real
   hardware.
+
+## Sound effects
+
+All tones come out of the MAX98357A speaker (volume: menu **Volume**). A
+sound never interrupts a more important one already playing
+(ambient < expression < menu < alerts < call/alarm).
+
+| Event | Sound | Mode |
+|---|---|---|
+| Blink (incl. double-blink, 1st one only) | recorded voice clip (`mochi_blink.wav`), falls back to a soft synthetic tick if missing | ALL |
+| Eyes glance left/right/up/down | bubbly "blup" (synthetic - no recorded clip for this one) | ALL |
+| A mood animation starts | that mood's own recorded voice clip (`mochi_00N.wav`), falls back to a synthetic "boink" sweep if missing | ALL |
+| Named expression change (Happy/Surprised/Cute/... on the procedural face) | springy "boink" | ALL |
+| Chat message | "beep-beep" | ALRT+ |
+| Incoming call | "beeep-beeep-beeep", repeats until answered/ended or a button is pressed | ALRT+ |
+| Navigation turn | left = falling pair, right = rising pair, straight = one long beep, U-turn = zig-zag, arrive = 3-note chime | ALRT+ |
+| Alarm | urgent two-tone until dismissed | ALRT+ |
+
+The mood frames are baked bitmaps, so a "glance" slides the whole face image
+a few pixels (`SPRITE_GLANCE_*` in `dirgamochi_config.h`). Navigation
+direction is read from the instruction text (English + Indonesian keywords),
+falling back to the turn icon; the guess is printed to Serial as
+`[NAV] turn=...` so it can be tuned. The sound plays once per new maneuver,
+not on every distance update.
 
 ## Buzzer / notification sound
 
@@ -158,7 +215,9 @@ have:
 A tiny on-device list, navigable with the existing three buttons, backed
 by NVS (`Preferences`) so choices survive a power cycle:
 
-- **Buzzer** — beeps on/off.
+- **Sound** — TALK cycles OFF / ALRT / ALL. ALRT = alerts only (message,
+  call, navigation, alarm); ALL = alerts plus the face sound effects
+  below. Replaces the old Buzzer on/off (your old setting carries over).
 - **Volume** — Low / Med / High (TALK cycles; you hear the new level
   immediately). Sets the sine amplitude of the speaker beeps; levels are
   `BEEP_VOLUME_*` in `dirgamochi_config.h`.
@@ -177,6 +236,26 @@ relayed via its QR/link-sharing feature
 the start, just not wired to a screen until now) as an actual scannable QR
 code (via the `ricmoo/QRCode` library), not just raw text. If more than one
 link has been sent, TALK cycles between them.
+
+Sized for a small 0.96" panel: the smallest QR version that fits the link
+(ECC low, tried from version 2 up to 6) is picked automatically, then
+scaled up by the largest whole pixel-per-module factor that still fits the
+64px-tall screen — noticeably bigger than a fixed small code with wasted
+margin. Colors are inverted from the rest of the UI (lit/white background,
+unlit/black data modules), matching a normal printed QR code — camera
+scanners are tuned to expect dark squares on a light background, not the
+reverse, and the white margin doubles as the quiet zone. If the link is too
+long to fit any of the tried versions, the screen says so instead of
+guessing.
+
+## Phone / Connected screen
+
+Cycled to with NEXT (or TALK jumps straight to it), after MUSIC. While BLE
+is connected, it's a big checkmark inside a circle centered on the screen
+with "Connected" below it, instead of a text line — the phone
+battery/charging details and the find-phone hint give way to this while
+paired (they still show while disconnected/advertising, when there's no
+"connected" to celebrate).
 
 ## Chronos features wired up in this base
 
@@ -301,9 +380,9 @@ dirgamochi-c3/
 │   ├── audio_engine.h
 │   ├── buzzer_engine.h       # passive-piezo beep patterns (ledc PWM)
 │   ├── menu_engine.h         # on-device settings menu + NVS persistence
-│   ├── sprite_face_engine.h  # bitmap idle-mood player (rest / blink / random mood)
+│   ├── sprite_face_engine.h  # bitmap idle-mood player (rest / blink / glance / random mood)
 │   ├── text_utils.h          # UTF-8-safe OLED text sanitizer
-│   └── generated/            # (git-ignored) face_frames.h, from tools/generate_faces.py
+│   └── generated/            # (git-ignored) face_frames.h, voice_clips.h, sleep_logo.h
 ├── src/
 │   ├── main.cpp               # wiring everything together
 │   ├── face_engine.cpp        # procedural round-eye faces + idle animation
@@ -314,9 +393,12 @@ dirgamochi-c3/
 │   ├── menu_engine.cpp
 │   ├── sprite_face_engine.cpp
 │   ├── text_utils.cpp
-│   └── generated/            # (git-ignored) face_frames.cpp, ~9MB of bitmap arrays
-├── assets/faces/mochi_0..9.zip  # source PNG animations (167 frames each, 98x64)
-├── tools/generate_faces.py      # PNG zips -> PROGMEM bitmap sources (pre-build)
+│   └── generated/            # (git-ignored) face_frames.cpp, voice_clips.cpp, sleep_logo.cpp
+├── assets/
+│   ├── faces/mochi_0..9.zip     # source PNG mood animations (variable frame count, 98x64)
+│   ├── audio/mochi_voices.zip   # source voice clips (IMA ADPCM/WAV, 16kHz mono)
+│   └── misc/sleep_logo.png      # shown while ambient-sleepy
+├── tools/generate_assets.py     # assets/* -> PROGMEM/ADPCM sources (pre-build)
 ├── lib/ChronosESP32/          # vendored fbiego/chronos-esp32 v1.9.1 (MIT)
 ├── .github/workflows/build.yml
 ├── platformio.ini
@@ -343,6 +425,31 @@ dirgamochi-c3/
 Firmware code in this repository: MIT (see `LICENSES.md`). The vendored
 `lib/ChronosESP32` keeps its own upstream MIT license
 (`lib/ChronosESP32/LICENSE-chronos`).
+
+## v0.6.0 changes
+
+- Replaced all 10 mood animations and added matching recorded voice clips
+  (IMA ADPCM/WAV, one per mood + one for blink) - see "Bitmap idle moods".
+  AudioEngine gained a non-blocking IMA ADPCM streaming decoder.
+- New sleep logo screen (assets/misc/sleep_logo.png), shown instead of any
+  face during quiet hours/idle timeout.
+- QR screen: auto-sized (largest that fits a 0.96" panel) and inverted
+  (dark modules on a light background, like a normal printed QR).
+- Phone screen: big checkmark-in-circle + "Connected" while paired.
+- tools/generate_faces.py renamed to tools/generate_assets.py (now handles
+  faces + audio + the sleep logo).
+- Fixed: an alert (message/call/nav) interrupting a voice clip could get
+  stuck instead of playing through, if it started an even-priority tone
+  right after a lower one - see BuzzerEngine::loadPattern().
+
+## v0.5.1 changes
+
+- Sound effects: blink, glance ("blup"), expression change ("boink"),
+  message "beep-beep", call "beeep-beeep-beeep", per-direction navigation
+  cues (see "Sound effects").
+- Idle face now glances left/right/up/down occasionally.
+- Sound priorities (blink never cuts off a notification) and per-sound
+  gain; menu "Buzzer" became "Sound" (OFF / ALRT / ALL).
 
 ## v0.5 changes
 
