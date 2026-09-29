@@ -1,0 +1,16 @@
+diff --git a/src/main.cpp b/src/main.cpp
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -633,8 +633,12 @@ void loop()
+             ui.update();
+         }
+     }
+-    audio.loop();  // advances any in-progress speaker tone (non-blocking)
+-    buzzer.loop(); // advances any in-progress beep pattern
++    // Advance the actual I2S stream first. BuzzerEngine only observes
++    // AudioEngine's ADPCM state; running it first could make completion
++    // detection lag by one loop tick. Both calls remain non-blocking.
++    audio.loop();
++    buzzer.loop();
+ }
+*** End Patch
