@@ -51,6 +51,10 @@ public:
         return e;
     }
 
+    // Which mood set is currently (or was most recently) playing - valid
+    // to read right after takeEvents() returns SPRITE_EV_MOOD.
+    int currentAnimSet() const { return _animSet; }
+
 private:
     enum State
     {

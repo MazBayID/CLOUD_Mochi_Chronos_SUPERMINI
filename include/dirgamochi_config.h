@@ -26,7 +26,7 @@
 #endif
 
 #define DIRGA_FW_NAME "Dirgamochi-C3"
-#define DIRGA_FW_VERSION "0.5.1-DIAG"
+#define DIRGA_FW_VERSION "0.6.0-DIAG"
 #define DIRGA_BLE_NAME "Dirgamochi"
 
 // ---------- OLED (SSD1306 128x64, I2C) ----------
@@ -113,7 +113,7 @@
 // by a quick second blink (a natural-looking double-blink).
 #define SPRITE_BLINK_INTERVAL_MIN_MS 2500UL
 #define SPRITE_BLINK_INTERVAL_MAX_MS 5500UL
-#define SPRITE_BLINK_HOLD_MS 130UL
+#define SPRITE_BLINK_HOLD_MS 400UL // matches mochi_blink.wav's ~0.41s length
 #define SPRITE_DOUBLE_BLINK_PERCENT 20
 #define SPRITE_DOUBLE_BLINK_GAP_MS 150UL
 

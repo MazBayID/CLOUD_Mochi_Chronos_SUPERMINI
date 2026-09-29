@@ -36,6 +36,11 @@ public:
     void setEnabled(bool enabled); // master on/off: alerts + everything
     bool isEnabled() const { return _enabled; }
 
+    // Whether any sound (tone pattern or voice clip) is currently playing,
+    // and at what priority - lets main.cpp avoid stepping on its own sounds.
+    bool isPlaying() const { return _playing; }
+    int currentPriority() const { return _currentPriority; }
+
     // Ambient effects (blink / blup / boink) can be muted separately while
     // alerts (message, call, navigation, alarm) stay on.
     void setAmbientEnabled(bool enabled) { _ambientEnabled = enabled; }
@@ -58,6 +63,12 @@ public:
     void playAlarm();        // repeating urgent pattern until stop()
     void stop();
 
+    // --- recorded voice clips (see include/generated/voice_clips.h) ---
+    // Same priority scheme as the tone patterns above (blink/mood voice
+    // sit at ambient/expression tier 0-1, so a real alert still cuts them
+    // off). No-op if data is null (a mood with no matching clip).
+    void playVoice(const unsigned char *adpcmData, uint32_t len, uint16_t blockAlign, int priority);
+
 private:
     struct Step
     {
@@ -73,6 +84,7 @@ private:
     unsigned long _stepStartedAt = 0;
     bool _playing = false;
     bool _looping = false;
+    bool _voiceMode = false; // true while a recorded ADPCM clip owns the sound output
     int _currentPriority = 0;
 
     bool _enabled = true;

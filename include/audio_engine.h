@@ -40,6 +40,14 @@ public:
     // 0=low, 1=med, 2=high - see BEEP_VOLUME_* in dirgamochi_config.h
     void setVolume(uint8_t level);
 
+    // Non-blocking IMA ADPCM (WAV tag 0x11) playback for the mood/blink
+    // voice clips (see include/generated/voice_clips.h). data must stay
+    // valid for the whole playback (it's a PROGMEM pointer into flash, so
+    // that's always true here). Volume-scaled the same way as startTone().
+    void playADPCM(const unsigned char *data, uint32_t len, uint16_t blockAlign);
+    bool isADPCMPlaying() const { return _adpcmActive; }
+    void stopADPCM();
+
 private:
     bool _inited = false;      // full mic+speaker pipeline (ENABLE_AUDIO) is up
     bool _speakerReady = false; // *some* I2S TX path (speaker-only or full) is up
@@ -49,6 +57,18 @@ private:
     float _toneFreqHz = 0.0f;
     int _toneGain = 100;
     int _toneAmplitude = 5000; // overwritten by setVolume(); see .cpp for the level table
+
+    // ADPCM streaming decode state
+    bool _adpcmActive = false;
+    const unsigned char *_adpcmData = nullptr;
+    uint32_t _adpcmLen = 0;
+    uint32_t _adpcmPos = 0;
+    uint16_t _adpcmBlockAlign = 256;
+    int16_t _adpcmPredictor = 0;
+    int8_t _adpcmStepIndex = 0;
+    bool _adpcmHighNibbleDone = false;
+
+    int16_t adpcmDecodeNextSample();
 };
 
 #endif // AUDIO_ENGINE_H
