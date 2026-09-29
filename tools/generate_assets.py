@@ -278,7 +278,7 @@ def generate_audio():
         log(f"no {AUDIO_ZIP} - skipping audio generation")
         return
 
-    if is_up_to_date([VOICE_OUT_SOURCE, VOICE_OUT_HEADER], [AUDIO_ZIP, os.path.abspath(__file__)]):
+    if is_up_to_date([VOICE_OUT_SOURCE, VOICE_OUT_HEADER], [AUDIO_ZIP, os.path.abspath("tools/generate_assets.py")]):
         log("voice sources are up to date - skipping (use --force to rebuild)")
         return
 
