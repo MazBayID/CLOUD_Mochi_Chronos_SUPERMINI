@@ -10,6 +10,44 @@ static const i2s_port_t I2S_PORT = I2S_NUM_0;
 static const int TONE_SAMPLE_RATE = 16000; // matches VOICE_SAMPLE_RATE - same I2S clock serves both
 static const int TONE_CHUNK_SAMPLES = 128; // pushed per loop() tick, non-blocking
 
+// Pending TX data is kept when i2s_write() accepts fewer bytes than requested.
+// This is important for non-blocking playback: decoded ADPCM samples must never
+// be discarded just because the DMA queue is temporarily full.
+static int16_t s_txPending[TONE_CHUNK_SAMPLES];
+static size_t s_txPendingBytes = 0;
+static size_t s_txPendingOffset = 0;
+
+static void clearTxPending()
+{
+    s_txPendingBytes = 0;
+    s_txPendingOffset = 0;
+}
+
+static bool flushTxPending()
+{
+    if (s_txPendingOffset >= s_txPendingBytes)
+    {
+        clearTxPending();
+        return true;
+    }
+
+    size_t written = 0;
+    const size_t remaining = s_txPendingBytes - s_txPendingOffset;
+    i2s_write(I2S_PORT,
+              reinterpret_cast<const uint8_t *>(s_txPending) + s_txPendingOffset,
+              remaining,
+              &written,
+              0);
+
+    s_txPendingOffset += written;
+    if (s_txPendingOffset >= s_txPendingBytes)
+    {
+        clearTxPending();
+        return true;
+    }
+    return false;
+}
+
 // ---- IMA ADPCM (WAV format tag 0x11) decode tables -------------------
 // Standard Interactive Multimedia Association tables; verified byte-exact
 // against a reference decoder (Python's audioop.adpcm2lin) while building
@@ -41,21 +79,19 @@ static void configureI2SFullDuplex()
     cfg.dma_buf_count = 4;
     cfg.dma_buf_len = 256;
     cfg.use_apll = false;
-
     i2s_pin_config_t pins = {};
     pins.bck_io_num = MIC_SCK_PIN;   // == SPK_BCLK_PIN
     pins.ws_io_num = MIC_WS_PIN;     // == SPK_LRC_PIN
     pins.data_out_num = SPK_DIN_PIN; // to MAX98357A
     pins.data_in_num = MIC_SD_PIN;   // from INMP441
-
     i2s_driver_install(I2S_PORT, &cfg, 0, nullptr);
     i2s_set_pin(I2S_PORT, &pins);
 }
 #else
 // Speaker-only (TX): the default. Deliberately does NOT touch the mic pin
 // at all (data_in_num = I2S_PIN_NO_CHANGE), so this is safe to enable even
-// on a board where the INMP441 isn't wired/tested yet - it only drives the
-// existing MAX98357A amp so notification/nav/alarm beeps have somewhere
+// on a board where the INMP441 isn't wired/tested yet - it only drives
+// the existing MAX98357A amp so notification/nav/alarm beeps have somewhere
 // to come out of.
 static void configureI2STxOnly()
 {
@@ -69,7 +105,6 @@ static void configureI2STxOnly()
     cfg.dma_buf_count = 4;
     cfg.dma_buf_len = 256;
     cfg.use_apll = false;
-
     i2s_pin_config_t pins = {};
     pins.bck_io_num = SPK_BCLK_PIN;
     pins.ws_io_num = SPK_LRC_PIN;
@@ -83,6 +118,8 @@ static void configureI2STxOnly()
 
 void AudioEngine::begin()
 {
+    clearTxPending();
+
 #if ENABLE_AUDIO
     configureI2SFullDuplex();
     _inited = true;
@@ -98,56 +135,61 @@ void AudioEngine::loop()
     if (!_speakerReady)
         return;
 
+    // Always drain data that was already generated before creating more.
+    // If DMA is full, keep the remainder for the next loop tick.
+    if (s_txPendingBytes > s_txPendingOffset)
+    {
+        if (!flushTxPending())
+            return;
+    }
+
     if (_toneActive)
     {
-        // Push one small chunk of a continuous sine wave, non-blocking (0
-        // tick timeout): if the DMA buffer is already full this call
-        // returns immediately instead of stalling loop()/BLE, and we just
-        // try again next tick. A few dropped samples at most is inaudible;
-        // a stalled main loop while an alarm rings would not be.
-        static int16_t buf[TONE_CHUNK_SAMPLES * 2]; // interleaved L/R
+        // I2S is configured as ONLY_LEFT (mono), so one int16_t is one
+        // output sample. The previous implementation duplicated every
+        // sample as L/R even though the driver was configured for mono.
         const float twoPiOverRate = 2.0f * (float)PI / (float)TONE_SAMPLE_RATE;
         for (int i = 0; i < TONE_CHUNK_SAMPLES; i++)
         {
             int16_t s = (int16_t)((float)(_toneAmplitude * _toneGain / 100) * sinf(_tonePhase));
-            buf[i * 2] = s;
-            buf[i * 2 + 1] = s;
+            s_txPending[i] = s;
             _tonePhase += twoPiOverRate * _toneFreqHz;
             if (_tonePhase > 2.0f * (float)PI)
                 _tonePhase -= 2.0f * (float)PI;
         }
-
-        size_t written = 0;
-        i2s_write(I2S_PORT, buf, sizeof(buf), &written, 0); // 0 = don't block
+        s_txPendingBytes = sizeof(s_txPending);
+        s_txPendingOffset = 0;
+        flushTxPending();
         return;
     }
 
     if (_adpcmActive)
     {
-        // Same non-blocking chunking approach as the tone path above, just
-        // fed from the ADPCM decoder instead of a sine generator.
-        static int16_t buf[TONE_CHUNK_SAMPLES * 2];
+        // Decode only into the pending mono buffer. _adpcmPos may advance while
+        // filling it, but the decoded PCM is retained until I2S accepts it.
         int produced = 0;
         while (produced < TONE_CHUNK_SAMPLES && _adpcmPos < _adpcmLen)
         {
             int16_t raw = adpcmDecodeNextSample();
             // Scale by the same amplitude the tone generator uses, so
-            // voice clips track the Volume menu setting consistently
-            // instead of always playing at full scale.
+            // voice clips track the Volume menu setting consistently.
             int16_t s = (int16_t)(((int32_t)raw * _toneAmplitude) / 32767);
-            buf[produced * 2] = s;
-            buf[produced * 2 + 1] = s;
-            produced++;
+            s_txPending[produced++] = s;
         }
 
         if (produced > 0)
         {
-            size_t written = 0;
-            i2s_write(I2S_PORT, buf, produced * 2 * sizeof(int16_t), &written, 0);
+            s_txPendingBytes = (size_t)produced * sizeof(int16_t);
+            s_txPendingOffset = 0;
+            flushTxPending();
         }
 
-        if (_adpcmPos >= _adpcmLen)
-            _adpcmActive = false; // clip finished
+        // The clip is only finished after every generated PCM byte has also
+        // been accepted by the I2S driver. This prevents the final chunk from
+        // being marked finished while it is still waiting in our software
+        // buffer.
+        if (_adpcmPos >= _adpcmLen && s_txPendingBytes == 0)
+            _adpcmActive = false;
         return;
     }
 }
@@ -180,15 +222,15 @@ void AudioEngine::playTone(uint16_t freqHz, uint16_t durationMs)
     // the main loop during normal operation.
     if (!_speakerReady)
         return;
+
     const int totalSamples = (TONE_SAMPLE_RATE * durationMs) / 1000;
-    int16_t sample;
-    size_t written;
+    size_t written = 0;
+
     for (int i = 0; i < totalSamples; i++)
     {
         float t = (float)i / (float)TONE_SAMPLE_RATE;
-        sample = (int16_t)((float)_toneAmplitude * sinf(2.0f * PI * freqHz * t));
-        int16_t stereo[2] = {sample, sample};
-        i2s_write(I2S_PORT, stereo, sizeof(stereo), &written, portMAX_DELAY);
+        int16_t sample = (int16_t)((float)_toneAmplitude * sinf(2.0f * PI * freqHz * t));
+        i2s_write(I2S_PORT, &sample, sizeof(sample), &written, portMAX_DELAY);
     }
 }
 
@@ -212,7 +254,11 @@ void AudioEngine::startTone(uint16_t freqHz, uint8_t gainPercent)
 {
     if (!_speakerReady)
         return;
+
     _adpcmActive = false; // tone and voice never play at once
+    clearTxPending();
+    i2s_zero_dma_buffer(I2S_PORT);
+
     _toneGain = gainPercent > 100 ? 100 : gainPercent;
     _toneFreqHz = (float)freqHz;
     _toneActive = true;
@@ -221,6 +267,7 @@ void AudioEngine::startTone(uint16_t freqHz, uint8_t gainPercent)
 void AudioEngine::stopTone()
 {
     _toneActive = false;
+    clearTxPending();
     if (_speakerReady)
         i2s_zero_dma_buffer(I2S_PORT); // clear any samples still queued, so it stops promptly
 }
@@ -231,10 +278,14 @@ void AudioEngine::playADPCM(const unsigned char *data, uint32_t len, uint16_t bl
 {
     if (!_speakerReady || !data || len < 4)
         return;
+
     _toneActive = false; // tone and voice never play at once
+    clearTxPending();
+    i2s_zero_dma_buffer(I2S_PORT);
+
     _adpcmData = data;
     _adpcmLen = len;
-    _adpcmBlockAlign = blockAlign;
+    _adpcmBlockAlign = blockAlign ? blockAlign : 256;
     _adpcmPos = 0;
     _adpcmHighNibbleDone = false;
     _adpcmActive = true;
@@ -243,6 +294,7 @@ void AudioEngine::playADPCM(const unsigned char *data, uint32_t len, uint16_t bl
 void AudioEngine::stopADPCM()
 {
     _adpcmActive = false;
+    clearTxPending();
     if (_speakerReady)
         i2s_zero_dma_buffer(I2S_PORT);
 }
@@ -261,21 +313,39 @@ int16_t AudioEngine::adpcmDecodeNextSample()
 
     if (offsetInBlock == 0)
     {
+        // A valid ADPCM block must have its 4-byte header available.
+        if (_adpcmPos + 4 > _adpcmLen)
+        {
+            _adpcmPos = _adpcmLen;
+            return 0;
+        }
+
         uint8_t lo = _adpcmData[_adpcmPos];
         uint8_t hi = _adpcmData[_adpcmPos + 1];
         _adpcmPredictor = (int16_t)((uint16_t)lo | ((uint16_t)hi << 8));
         _adpcmStepIndex = (int8_t)_adpcmData[_adpcmPos + 2];
+
         if (_adpcmStepIndex < 0)
             _adpcmStepIndex = 0;
         if (_adpcmStepIndex > 88)
             _adpcmStepIndex = 88;
+
         _adpcmPos += 4; // header is 4 bytes: predictor lo/hi, step index, reserved
         _adpcmHighNibbleDone = false;
         return _adpcmPredictor;
     }
 
+    // If the block is malformed/truncated, finish safely instead of reading
+    // beyond the raw asset buffer.
+    if (_adpcmPos >= _adpcmLen)
+    {
+        _adpcmPos = _adpcmLen;
+        return _adpcmPredictor;
+    }
+
     uint8_t byteVal = _adpcmData[_adpcmPos];
     uint8_t nibble;
+
     if (!_adpcmHighNibbleDone)
     {
         nibble = (byteVal >> 4) & 0x0F;
@@ -287,6 +357,11 @@ int16_t AudioEngine::adpcmDecodeNextSample()
         _adpcmHighNibbleDone = false;
         _adpcmPos++;
     }
+
+    // Do not let the decoder cross an ADPCM block boundary.
+    uint32_t nextBlock = blockStart + _adpcmBlockAlign;
+    if (_adpcmPos > nextBlock)
+        _adpcmPos = nextBlock > _adpcmLen ? _adpcmLen : nextBlock;
 
     int step = ADPCM_STEP_TABLE[_adpcmStepIndex];
     int diff = step >> 3;
@@ -302,10 +377,12 @@ int16_t AudioEngine::adpcmDecodeNextSample()
         predictor -= diff;
     else
         predictor += diff;
+
     if (predictor > 32767)
         predictor = 32767;
     else if (predictor < -32768)
         predictor = -32768;
+
     _adpcmPredictor = (int16_t)predictor;
 
     int stepIndex = _adpcmStepIndex + ADPCM_INDEX_TABLE[nibble];
