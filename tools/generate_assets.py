@@ -166,7 +166,7 @@ def generate_faces():
         return
 
     zpaths = [os.path.join(FACES_DIR, z) for z in zips]
-    if is_up_to_date([FACE_OUT_SOURCE, FACE_OUT_HEADER], zpaths + [os.path.abspath("tools/generate_assets.py")]):
+    if is_up_to_date([FACE_OUT_SOURCE, FACE_OUT_HEADER], zpaths + [os.path.abspath(__file__)]):
         log("face sources are up to date - skipping (use --force to rebuild)")
         return
 
@@ -278,7 +278,7 @@ def generate_audio():
         log(f"no {AUDIO_ZIP} - skipping audio generation")
         return
 
-    if is_up_to_date([VOICE_OUT_SOURCE, VOICE_OUT_HEADER], [AUDIO_ZIP, os.path.abspath("tools/generate_assets.py")]):
+    if is_up_to_date([VOICE_OUT_SOURCE, VOICE_OUT_HEADER], [AUDIO_ZIP, os.path.abspath(__file__)]):
         log("voice sources are up to date - skipping (use --force to rebuild)")
         return
 
