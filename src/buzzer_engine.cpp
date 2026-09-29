@@ -70,6 +70,7 @@ void BuzzerEngine::loadPattern(const Step *steps, int count, bool loop, int prio
     _stepCount = count;
     _stepIndex = 0;
     _looping = loop;
+    _voiceMode = false; // a tone pattern is taking over from any prior voice clip
     _currentPriority = priority;
     _playing = true;
     _stepStartedAt = millis();
@@ -181,12 +182,37 @@ void BuzzerEngine::playAlarm()
     loadPattern(p, 4, true, 4);
 }
 
+// ---- recorded voice clips ----
+
+void BuzzerEngine::playVoice(const unsigned char *adpcmData, uint32_t len, uint16_t blockAlign, int priority)
+{
+    if (!_enabled || !adpcmData || len == 0)
+        return;
+    // Same ambient-mute rule as playBlink()/playBlup()/playBoink(): the
+    // blink/mood voice clips sit at that same tier (priority 0-1).
+    if (priority < 2 && !_ambientEnabled)
+        return;
+    if (_playing && priority < _currentPriority)
+        return;
+
+    _stepCount = 0; // any in-progress tone pattern is superseded
+    _looping = false;
+    _voiceMode = true;
+    _currentPriority = priority;
+    _playing = true;
+    if (_audio)
+        _audio->playADPCM(adpcmData, len, blockAlign);
+}
+
 void BuzzerEngine::stop()
 {
     _playing = false;
     _looping = false;
     _stepCount = 0;
     _currentPriority = 0;
+    if (_voiceMode && _audio)
+        _audio->stopADPCM();
+    _voiceMode = false;
     Step off = {0, 0, 0};
     applyStep(off);
 }
@@ -195,6 +221,19 @@ void BuzzerEngine::loop()
 {
     if (!_playing)
         return;
+
+    if (_voiceMode)
+    {
+        // A recorded clip streams itself via AudioEngine; just watch for
+        // it finishing (it never advances through _steps[]).
+        if (!_audio || !_audio->isADPCMPlaying())
+        {
+            _playing = false;
+            _voiceMode = false;
+            _currentPriority = 0;
+        }
+        return;
+    }
 
     unsigned long now = millis();
     if (now - _stepStartedAt < _steps[_stepIndex].durationMs)

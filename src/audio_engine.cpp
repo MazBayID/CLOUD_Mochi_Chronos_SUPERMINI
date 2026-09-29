@@ -7,8 +7,24 @@
 // (MAX98357A) share BCLK/WS on this board.
 static const i2s_port_t I2S_PORT = I2S_NUM_0;
 
-static const int TONE_SAMPLE_RATE = 16000;
+static const int TONE_SAMPLE_RATE = 16000; // matches VOICE_SAMPLE_RATE - same I2S clock serves both
 static const int TONE_CHUNK_SAMPLES = 128; // pushed per loop() tick, non-blocking
+
+// ---- IMA ADPCM (WAV format tag 0x11) decode tables -------------------
+// Standard Interactive Multimedia Association tables; verified byte-exact
+// against a reference decoder (Python's audioop.adpcm2lin) while building
+// the voice asset pipeline. Nibble order within each byte is high nibble
+// first, then low nibble (also verified against the reference decoder -
+// this is NOT the more commonly assumed "low nibble first").
+static const int8_t ADPCM_INDEX_TABLE[16] = {
+    -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8};
+static const int16_t ADPCM_STEP_TABLE[89] = {
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31,
+    34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143,
+    157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
+    724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024,
+    3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+    15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767};
 
 #if ENABLE_AUDIO
 // Full duplex: mic (RX) + speaker (TX). Only used once the voice pipeline
@@ -79,28 +95,61 @@ void AudioEngine::begin()
 
 void AudioEngine::loop()
 {
-    if (!_speakerReady || !_toneActive)
+    if (!_speakerReady)
         return;
 
-    // Push one small chunk of a continuous sine wave, non-blocking (0 tick
-    // timeout): if the DMA buffer is already full this call returns
-    // immediately instead of stalling loop()/BLE, and we just try again
-    // next tick. A few dropped samples at most is inaudible; a stalled
-    // main loop while an alarm rings would not be.
-    static int16_t buf[TONE_CHUNK_SAMPLES * 2]; // interleaved L/R
-    const float twoPiOverRate = 2.0f * (float)PI / (float)TONE_SAMPLE_RATE;
-    for (int i = 0; i < TONE_CHUNK_SAMPLES; i++)
+    if (_toneActive)
     {
-        int16_t s = (int16_t)((float)(_toneAmplitude * _toneGain / 100) * sinf(_tonePhase));
-        buf[i * 2] = s;
-        buf[i * 2 + 1] = s;
-        _tonePhase += twoPiOverRate * _toneFreqHz;
-        if (_tonePhase > 2.0f * (float)PI)
-            _tonePhase -= 2.0f * (float)PI;
+        // Push one small chunk of a continuous sine wave, non-blocking (0
+        // tick timeout): if the DMA buffer is already full this call
+        // returns immediately instead of stalling loop()/BLE, and we just
+        // try again next tick. A few dropped samples at most is inaudible;
+        // a stalled main loop while an alarm rings would not be.
+        static int16_t buf[TONE_CHUNK_SAMPLES * 2]; // interleaved L/R
+        const float twoPiOverRate = 2.0f * (float)PI / (float)TONE_SAMPLE_RATE;
+        for (int i = 0; i < TONE_CHUNK_SAMPLES; i++)
+        {
+            int16_t s = (int16_t)((float)(_toneAmplitude * _toneGain / 100) * sinf(_tonePhase));
+            buf[i * 2] = s;
+            buf[i * 2 + 1] = s;
+            _tonePhase += twoPiOverRate * _toneFreqHz;
+            if (_tonePhase > 2.0f * (float)PI)
+                _tonePhase -= 2.0f * (float)PI;
+        }
+
+        size_t written = 0;
+        i2s_write(I2S_PORT, buf, sizeof(buf), &written, 0); // 0 = don't block
+        return;
     }
 
-    size_t written = 0;
-    i2s_write(I2S_PORT, buf, sizeof(buf), &written, 0); // 0 = don't block
+    if (_adpcmActive)
+    {
+        // Same non-blocking chunking approach as the tone path above, just
+        // fed from the ADPCM decoder instead of a sine generator.
+        static int16_t buf[TONE_CHUNK_SAMPLES * 2];
+        int produced = 0;
+        while (produced < TONE_CHUNK_SAMPLES && _adpcmPos < _adpcmLen)
+        {
+            int16_t raw = adpcmDecodeNextSample();
+            // Scale by the same amplitude the tone generator uses, so
+            // voice clips track the Volume menu setting consistently
+            // instead of always playing at full scale.
+            int16_t s = (int16_t)(((int32_t)raw * _toneAmplitude) / 32767);
+            buf[produced * 2] = s;
+            buf[produced * 2 + 1] = s;
+            produced++;
+        }
+
+        if (produced > 0)
+        {
+            size_t written = 0;
+            i2s_write(I2S_PORT, buf, produced * 2 * sizeof(int16_t), &written, 0);
+        }
+
+        if (_adpcmPos >= _adpcmLen)
+            _adpcmActive = false; // clip finished
+        return;
+    }
 }
 
 bool AudioEngine::isEnabled() const
@@ -163,6 +212,7 @@ void AudioEngine::startTone(uint16_t freqHz, uint8_t gainPercent)
 {
     if (!_speakerReady)
         return;
+    _adpcmActive = false; // tone and voice never play at once
     _toneGain = gainPercent > 100 ? 100 : gainPercent;
     _toneFreqHz = (float)freqHz;
     _toneActive = true;
@@ -173,4 +223,97 @@ void AudioEngine::stopTone()
     _toneActive = false;
     if (_speakerReady)
         i2s_zero_dma_buffer(I2S_PORT); // clear any samples still queued, so it stops promptly
+}
+
+// ---- IMA ADPCM streaming playback --------------------------------------
+
+void AudioEngine::playADPCM(const unsigned char *data, uint32_t len, uint16_t blockAlign)
+{
+    if (!_speakerReady || !data || len < 4)
+        return;
+    _toneActive = false; // tone and voice never play at once
+    _adpcmData = data;
+    _adpcmLen = len;
+    _adpcmBlockAlign = blockAlign;
+    _adpcmPos = 0;
+    _adpcmHighNibbleDone = false;
+    _adpcmActive = true;
+}
+
+void AudioEngine::stopADPCM()
+{
+    _adpcmActive = false;
+    if (_speakerReady)
+        i2s_zero_dma_buffer(I2S_PORT);
+}
+
+// Decodes exactly one PCM sample from the current stream position and
+// advances it. Every WAV IMA ADPCM block starts with a 4-byte header (an
+// int16 initial predictor, a step-index byte, a reserved byte) which IS
+// itself the block's first sample, followed by nibble-packed samples (high
+// nibble of each byte first, then low - see the note by ADPCM_INDEX_TABLE).
+// PROGMEM data is directly readable on ESP32 (unlike AVR), so this is a
+// plain pointer dereference - no pgm_read_byte() needed.
+int16_t AudioEngine::adpcmDecodeNextSample()
+{
+    uint32_t blockStart = (_adpcmPos / _adpcmBlockAlign) * _adpcmBlockAlign;
+    uint32_t offsetInBlock = _adpcmPos - blockStart;
+
+    if (offsetInBlock == 0)
+    {
+        uint8_t lo = _adpcmData[_adpcmPos];
+        uint8_t hi = _adpcmData[_adpcmPos + 1];
+        _adpcmPredictor = (int16_t)((uint16_t)lo | ((uint16_t)hi << 8));
+        _adpcmStepIndex = (int8_t)_adpcmData[_adpcmPos + 2];
+        if (_adpcmStepIndex < 0)
+            _adpcmStepIndex = 0;
+        if (_adpcmStepIndex > 88)
+            _adpcmStepIndex = 88;
+        _adpcmPos += 4; // header is 4 bytes: predictor lo/hi, step index, reserved
+        _adpcmHighNibbleDone = false;
+        return _adpcmPredictor;
+    }
+
+    uint8_t byteVal = _adpcmData[_adpcmPos];
+    uint8_t nibble;
+    if (!_adpcmHighNibbleDone)
+    {
+        nibble = (byteVal >> 4) & 0x0F;
+        _adpcmHighNibbleDone = true;
+    }
+    else
+    {
+        nibble = byteVal & 0x0F;
+        _adpcmHighNibbleDone = false;
+        _adpcmPos++;
+    }
+
+    int step = ADPCM_STEP_TABLE[_adpcmStepIndex];
+    int diff = step >> 3;
+    if (nibble & 4)
+        diff += step;
+    if (nibble & 2)
+        diff += step >> 1;
+    if (nibble & 1)
+        diff += step >> 2;
+
+    int32_t predictor = _adpcmPredictor;
+    if (nibble & 8)
+        predictor -= diff;
+    else
+        predictor += diff;
+    if (predictor > 32767)
+        predictor = 32767;
+    else if (predictor < -32768)
+        predictor = -32768;
+    _adpcmPredictor = (int16_t)predictor;
+
+    int stepIndex = _adpcmStepIndex + ADPCM_INDEX_TABLE[nibble];
+    if (stepIndex < 0)
+        stepIndex = 0;
+    else if (stepIndex > 88)
+        stepIndex = 88;
+    _adpcmStepIndex = (int8_t)stepIndex;
+
+    return _adpcmPredictor;
 }

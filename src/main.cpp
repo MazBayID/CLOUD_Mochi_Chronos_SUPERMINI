@@ -48,6 +48,8 @@
 #include "dirgamochi_config.h"
 #include "face_engine.h"
 #include "sprite_face_engine.h"
+#include "generated/voice_clips.h"
+#include "generated/sleep_logo.h"
 #include "chronos_ui.h"
 #include "button_engine.h"
 #include "audio_engine.h"
@@ -74,6 +76,7 @@ unsigned long navigationUntil = 0;
 unsigned long pettingUntil = 0;
 unsigned long transientExprUntil = 0; // when a short-lived expression should revert to NORMAL
 bool spriteActive = false;            // true while spriteFace currently owns the display
+bool sleepLogoDrawn = false;          // true once the static sleep logo has been painted this session
 
 int qrLinkCount = 0;
 
@@ -613,8 +616,24 @@ void loop()
             bool plainIdle = face.getExpression() == FACE_NORMAL &&
                              !pettingUntil && !ambientIsSleepy && !prevTouchState;
 
-            if (plainIdle)
+            if (ambientIsSleepy)
             {
+                // Quiet hours / idle timeout: show the static sleep logo
+                // instead of any face. Painted once on entry, not redrawn
+                // every tick - it never changes, so there's nothing to gain
+                // from re-sending the same bitmap over I2C repeatedly.
+                spriteActive = false;
+                if (!sleepLogoDrawn)
+                {
+                    display.clearDisplay();
+                    display.drawBitmap(0, 0, sleepLogoBitmap, SLEEP_LOGO_WIDTH, SLEEP_LOGO_HEIGHT, SSD1306_WHITE);
+                    display.display();
+                    sleepLogoDrawn = true;
+                }
+            }
+            else if (plainIdle)
+            {
+                sleepLogoDrawn = false;
                 if (!spriteActive)
                 {
                     spriteFace.resetIdleTimers(); // also forces a fresh redraw
@@ -623,18 +642,32 @@ void loop()
                 spriteFace.update(bleConnected);
 
                 // Face sound effects (muted by Sound = ALRT/OFF in the menu):
-                // a full mood animation starting is an expression change
-                // ("boink"), a glance is "blup", a blink is "blink".
+                // a full mood animation starting plays that mood's own
+                // recorded voice clip, a blink plays the recorded blink
+                // clip, a glance still uses the synthetic "blup" tone (no
+                // recorded clip for that).
                 uint8_t ev = spriteFace.takeEvents();
                 if (ev & SPRITE_EV_MOOD)
-                    buzzer.playBoink();
+                {
+                    int set = spriteFace.currentAnimSet();
+                    if (set >= 0 && set < VOICE_MOOD_COUNT && moodVoiceData[set])
+                        buzzer.playVoice(moodVoiceData[set], moodVoiceLength[set], VOICE_BLOCK_ALIGN, 1);
+                    else
+                        buzzer.playBoink(); // fallback synthetic sweep if no clip for this mood
+                }
                 else if (ev & SPRITE_EV_GLANCE)
                     buzzer.playBlup();
                 else if (ev & SPRITE_EV_BLINK)
-                    buzzer.playBlink();
+                {
+                    if (blinkVoiceData_)
+                        buzzer.playVoice(blinkVoiceData_, blinkVoiceLength, VOICE_BLOCK_ALIGN, 0);
+                    else
+                        buzzer.playBlink(); // fallback synthetic tick if no blink clip was generated
+                }
             }
             else
             {
+                sleepLogoDrawn = false;
                 spriteActive = false;
                 face.update(bleConnected);
             }
@@ -642,6 +675,7 @@ void loop()
         else
         {
             spriteActive = false; // another screen owns the display now
+            sleepLogoDrawn = false;
             ui.update();
         }
     }

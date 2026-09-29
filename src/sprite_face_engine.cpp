@@ -93,7 +93,11 @@ void SpriteFaceEngine::update(bool bleConnected)
         {
             _lastFrameAt = now;
             _state = STATE_BLINKING;
-            _events |= SPRITE_EV_BLINK;
+            // Only cue the blink sound on the primary blink, not on a
+            // double-blink's quick follow-up - playing the same clip twice
+            // 150ms apart reads as a glitch rather than a natural flutter.
+            if (!_secondBlinkPending)
+                _events |= SPRITE_EV_BLINK;
             changed = true;
         }
         else if (now >= _nextGlanceAt)

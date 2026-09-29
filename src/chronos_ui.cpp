@@ -230,20 +230,47 @@ void ChronosUI::drawMusic()
 
 void ChronosUI::drawPhone()
 {
-    header("PHONE");
-    _display->setCursor(0, 14);
-    _display->print(_watch->isConnected() ? "BLE: Connected" : "BLE: Waiting...");
-    _display->setCursor(0, 26);
-    _display->print("Batt: " + String(_watch->getPhoneBattery()) + "%");
-    _display->setCursor(0, 38);
-    _display->print(_watch->isPhoneCharging() ? "Charging" : "On battery");
-    _display->setCursor(0, 52);
-    _display->print("Hold TALK: find phone");
+    if (!_watch->isConnected())
+    {
+        header("PHONE");
+        _display->setCursor(0, 14);
+        _display->print("BLE: Waiting...");
+        _display->setCursor(0, 26);
+        _display->print("Batt: " + String(_watch->getPhoneBattery()) + "%");
+        _display->setCursor(0, 38);
+        _display->print(_watch->isPhoneCharging() ? "Charging" : "On battery");
+        _display->setCursor(0, 52);
+        _display->print("Hold TALK: find phone");
+        return;
+    }
+
+    // Connected: a big checkmark-in-circle centered on screen, with
+    // "Connected" below it, instead of a plain text line - the phone/
+    // battery details give way to this while paired.
+    const int cx = OLED_WIDTH / 2;
+    const int cy = 25;
+    const int r = 20;
+    _display->drawCircle(cx, cy, r, SSD1306_WHITE);
+    _display->drawCircle(cx, cy, r - 1, SSD1306_WHITE); // 2px-thick ring
+
+    // Checkmark, drawn as two doubled-up strokes for a bit of weight.
+    for (int off = 0; off <= 1; off++)
+    {
+        _display->drawLine(cx - 10, cy + 2 + off, cx - 3, cy + 9 + off, SSD1306_WHITE);
+        _display->drawLine(cx - 3, cy + 9 + off, cx + 12, cy - 10 + off, SSD1306_WHITE);
+    }
+
+    _display->setTextSize(1);
+    _display->setTextColor(SSD1306_WHITE);
+    // "Connected" = 9 chars * 6px/char at text size 1 = 54px wide
+    _display->setCursor(cx - 27, 52);
+    _display->print("Connected");
 }
 
 void ChronosUI::drawQr()
 {
-    header("QR / LINK");
+    _display->setTextSize(1);
+    _display->setTextColor(SSD1306_WHITE);
 
     if (_qrCount <= 0)
     {
@@ -258,33 +285,52 @@ void ChronosUI::drawQr()
 
     String link = _watch->getQrAt(_qrIndex);
 
-    // Version 4 (33x33 modules) with the lowest error-correction level
-    // gives plenty of capacity for a typical URL/WiFi-QR payload while
-    // still comfortably fitting the OLED at 1 pixel per module.
+    // Auto-pick the smallest QR version (ECC_LOW - most capacity per
+    // module) that fits the link, then the largest integer pixel-per-module
+    // scale that still fits the 64px-tall OLED. This maximizes the QR's
+    // size on a small 0.96" screen instead of a fixed small code with a lot
+    // of wasted margin around it.
     QRCode qrcode;
-    uint8_t buf[qrcode_getBufferSize(4)];
-    qrcode_initText(&qrcode, buf, 4, ECC_LOW, link.c_str());
+    uint8_t buf[qrcode_getBufferSize(6)]; // big enough for every version tried below
+    bool ok = false;
+    for (uint8_t version = 2; version <= 6 && !ok; version++)
+        ok = qrcode_initText(&qrcode, buf, version, ECC_LOW, link.c_str()) == 0;
 
-    int originX = (OLED_WIDTH - qrcode.size) / 2;
-    int originY = 13;
-    if (originY + qrcode.size > OLED_HEIGHT)
-        originY = OLED_HEIGHT - qrcode.size;
+    if (!ok)
+    {
+        _display->setCursor(0, 25);
+        _display->print("Link too long");
+        _display->setCursor(0, 37);
+        _display->print("to show as a QR");
+        return;
+    }
 
+    int scale = OLED_HEIGHT / qrcode.size;
+    if (scale < 1)
+        scale = 1;
+    int qrPx = qrcode.size * scale;
+    int originX = (OLED_WIDTH - qrPx) / 2;
+    int originY = (OLED_HEIGHT - qrPx) / 2;
+
+    // Inverted for a 0.96" OLED: a lit (white) background with the QR's
+    // data modules drawn as unlit (black) pixels reads like a normal
+    // printed QR code (dark squares on a light background) - what phone
+    // camera scanners are tuned to expect - instead of the other way
+    // around. The plain white margin around it doubles as the quiet zone.
+    _display->fillRect(0, 0, OLED_WIDTH, OLED_HEIGHT, SSD1306_WHITE);
     for (uint8_t y = 0; y < qrcode.size; y++)
     {
         for (uint8_t x = 0; x < qrcode.size; x++)
         {
             if (qrcode_getModule(&qrcode, x, y))
-                _display->drawPixel(originX + x, originY + y, SSD1306_WHITE);
+                _display->fillRect(originX + x * scale, originY + y * scale, scale, scale, SSD1306_BLACK);
         }
     }
 
     if (_qrCount > 1)
     {
-        _display->setCursor(0, 0);
-        // overwrite the right side of the header with a page indicator
-        _display->fillRect(90, 0, OLED_WIDTH - 90, 8, SSD1306_BLACK);
-        _display->setCursor(90, 0);
+        _display->setTextColor(SSD1306_BLACK); // background here is now white
+        _display->setCursor(2, 2);
         _display->print(String(_qrIndex + 1) + "/" + String(_qrCount));
     }
 }
