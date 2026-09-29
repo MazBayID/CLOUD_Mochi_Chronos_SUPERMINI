@@ -6,7 +6,7 @@ link to the **Chronos** phone app, using [fbiego/chronos-esp32](https://github.c
 
 This Mochi can connected with Chronos app. Chronos supplies time,
 Chronos app: https://play.google.com/store/apps/details?id=com.fbiego.chronos&hl=id&referrer=utm_source%3Dgoogle%26utm_medium%3Dorganic%26utm_term%3Dlink+playstore+chronos&pcampaignid=APPU_1_oMq7at_5IvKLjuMP6uSEyAI
-Chronos website: chronos.ke
+Chronos website: https://chronos.ke
 weather, notifications, navigation, music and phone-battery data over BLE;
 Dirgamochi owns the OLED face, a small piezo buzzer, and the three physical
 touch buttons. Voice (INMP441 mic + MAX98357A amp) is wired in and the
