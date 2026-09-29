@@ -1,0 +1,30 @@
+diff --git a/src/sprite_face_engine.cpp b/src/sprite_face_engine.cpp
+--- a/src/sprite_face_engine.cpp
++++ b/src/sprite_face_engine.cpp
+@@ -84,15 +84,16 @@ void SpriteFaceEngine::update(bool bleConnected)
+         }
+         else if (now >= _nextBlinkAt)
+         {
+             _lastFrameAt = now;
+             _state = STATE_BLINKING;
+-            // Only cue the blink sound on the primary blink, not on a
+-            // double-blink's quick follow-up - playing the same clip twice
+-            // 150ms apart reads as a glitch rather than a natural flutter.
++            // Only cue the recorded blink clip on the primary blink. The
++            // follow-up half of a double-blink is visual-only so the same
++            // 400ms-ish recorded clip is not restarted ~150ms later.
+             if (!_secondBlinkPending)
+                 _events |= SPRITE_EV_BLINK;
+             changed = true;
+         }
+@@ -126,8 +127,8 @@ void SpriteFaceEngine::update(bool bleConnected)
+         break;
+     case STATE_BLINKING:
+         // The "closed eyes" frame is already on screen; hold it briefly,
+-        // then return to the resting frame.
++        // then return to the resting frame. SPRITE_BLINK_HOLD_MS is kept
++        // independent from the audio asset; the asset itself is not altered.
+         if (now - _lastFrameAt >= SPRITE_BLINK_HOLD_MS)
+         {
+             _state = STATE_RESTING;
+*** End Patch

@@ -1,0 +1,35 @@
+diff --git a/src/buzzer_engine.cpp b/src/buzzer_engine.cpp
+--- a/src/buzzer_engine.cpp
++++ b/src/buzzer_engine.cpp
+@@ -174,20 +174,24 @@ void BuzzerEngine::playAlarm()
+ // ---- recorded voice clips ----
+ void BuzzerEngine::playVoice(const unsigned char *adpcmData, uint32_t len, uint16_t blockAlign, int priority)
+ {
+     if (!_enabled || !adpcmData || len == 0)
+         return;
+@@
+     if (priority < 2 && !_ambientEnabled)
+         return;
+     if (_playing && priority < _currentPriority)
+         return;
++
++    // Explicitly stop the previous output before handing the speaker to a
++    // recorded clip. AudioEngine::playADPCM() also clears the I2S DMA, but
++    // keeping the ownership transition here makes the BuzzerEngine state
++    // unambiguous and prevents a stale tone pattern from being considered
++    // active while the ADPCM stream is starting.
++    if (_playing && !_voiceMode && _audio)
++        _audio->stopTone();
++
+     _stepCount = 0; // any in-progress tone pattern is superseded
+     _looping = false;
+     _voiceMode = true;
+     _currentPriority = priority;
+     _playing = true;
+@@
+     if (_voiceMode)
+     {
+         // A recorded clip streams itself via AudioEngine; just watch for
+         // it finishing (it never advances through _steps[]).
+         if (!_audio || !_audio->isADPCMPlaying())
+*** End Patch
