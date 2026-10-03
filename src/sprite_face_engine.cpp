@@ -1,14 +1,12 @@
 #include "sprite_face_engine.h"
 #include "dirgamochi_config.h"
 #include "generated/face_frames.h"
-#include <esp_system.h> // esp_random(), used to seed Arduino's random()
+#include <esp_system.h>
 
-// Glance offset envelope, one entry per frame tick (~100ms each at 10fps):
-// ease out, hold, hold, hold, ease back -> about half a second in total.
 static const int GLANCE_SCALE_PCT[] = {50, 100, 100, 100, 50};
 static const int GLANCE_STEP_COUNT = sizeof(GLANCE_SCALE_PCT) / sizeof(GLANCE_SCALE_PCT[0]);
 
-void SpriteFaceEngine::begin(Adafruit_SSD1306 *display)
+void SpriteFaceEngine::begin(Adafruit_SH1106G *display)
 {
     _display = display;
     if (!_seeded)
@@ -43,7 +41,7 @@ void SpriteFaceEngine::resetIdleTimers()
     _secondBlinkPending = false;
     _events = 0;
     scheduleNextGlance();
-    _everDrawn = false; // force a fresh redraw of the resting frame
+    _everDrawn = false;
     scheduleNextBlink();
     scheduleNextShow();
 }
@@ -52,19 +50,17 @@ void SpriteFaceEngine::drawFrame(const unsigned char *bitmap, int dx, int dy)
 {
     _display->clearDisplay();
     _display->drawBitmap(SPRITE_X_OFFSET + dx, SPRITE_Y_OFFSET + dy, bitmap,
-                         FACE_FRAME_W, FACE_FRAME_H, SSD1306_WHITE);
+                         FACE_FRAME_W, FACE_FRAME_H, SH110X_WHITE);
 }
 
 void SpriteFaceEngine::drawConnIcon(bool connected)
 {
-    // Same spot/style as FaceEngine::drawConnIcon so the indicator doesn't
-    // jump around when the two engines hand the screen back and forth.
     int cx = 122;
     int cy = 4;
     if (connected)
-        _display->fillCircle(cx, cy, 3, SSD1306_WHITE);
+        _display->fillCircle(cx, cy, 3, SH110X_WHITE);
     else
-        _display->drawCircle(cx, cy, 3, SSD1306_WHITE);
+        _display->drawCircle(cx, cy, 3, SH110X_WHITE);
 }
 
 void SpriteFaceEngine::update(bool bleConnected)
@@ -73,14 +69,13 @@ void SpriteFaceEngine::update(bool bleConnected)
         return;
 
     unsigned long now = millis();
-    bool changed = !_everDrawn; // first tick after (re)entering idle draws once
+    bool changed = !_everDrawn;
 
     switch (_state)
     {
     case STATE_RESTING:
         if (now >= _nextShowAt)
         {
-            // Time for a full mood animation: pick one at random.
             _animSet = random(0, FACE_ANIM_COUNT);
             _animFrame = 0;
             _secondBlinkPending = false;
@@ -93,16 +88,12 @@ void SpriteFaceEngine::update(bool bleConnected)
         {
             _lastFrameAt = now;
             _state = STATE_BLINKING;
-            // Only cue the blink sound on the primary blink, not on a
-            // double-blink's quick follow-up - playing the same clip twice
-            // 150ms apart reads as a glitch rather than a natural flutter.
             if (!_secondBlinkPending)
                 _events |= SPRITE_EV_BLINK;
             changed = true;
         }
         else if (now >= _nextGlanceAt)
         {
-            // pick left / right / up / down
             _glanceDirX = 0;
             _glanceDirY = 0;
             switch (random(0, 4))
@@ -135,20 +126,16 @@ void SpriteFaceEngine::update(bool bleConnected)
         break;
 
     case STATE_BLINKING:
-        // The "closed eyes" frame is already on screen; hold it briefly,
-        // then return to the resting frame.
         if (now - _lastFrameAt >= SPRITE_BLINK_HOLD_MS)
         {
             _state = STATE_RESTING;
             if (_secondBlinkPending)
             {
-                // that was the follow-up half of a double-blink
                 _secondBlinkPending = false;
                 scheduleNextBlink();
             }
             else if (random(0, 100) < SPRITE_DOUBLE_BLINK_PERCENT)
             {
-                // roll for a quick second blink right after this one
                 _secondBlinkPending = true;
                 _nextBlinkAt = now + SPRITE_DOUBLE_BLINK_GAP_MS;
             }
@@ -177,9 +164,6 @@ void SpriteFaceEngine::update(bool bleConnected)
         break;
     }
 
-    // Only touch the I2C bus when the picture actually changed - a resting
-    // face is a static image, so redrawing it every loop() tick would just
-    // waste bus time and CPU that BLE and button handling need.
     if (!changed)
         return;
 
@@ -188,7 +172,6 @@ void SpriteFaceEngine::update(bool bleConnected)
     switch (_state)
     {
     case STATE_GLANCING:
-        // Ease in/out: half shift, full shift (held), half shift, then back.
         ox = _glanceDirX * SPRITE_GLANCE_X * GLANCE_SCALE_PCT[_glanceStep] / 100;
         oy = _glanceDirY * SPRITE_GLANCE_Y * GLANCE_SCALE_PCT[_glanceStep] / 100;
         bmp = faceAnimFrames[0][0];
@@ -201,8 +184,6 @@ void SpriteFaceEngine::update(bool bleConnected)
         break;
     case STATE_RESTING:
     default:
-        // Every mood loop starts and ends on the same neutral pose, so the
-        // first frame of set 0 doubles as the universal resting frame.
         bmp = faceAnimFrames[0][0];
         break;
     }

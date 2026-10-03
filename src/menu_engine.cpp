@@ -1,16 +1,13 @@
 #include "menu_engine.h"
 #include "dirgamochi_config.h"
 
-void MenuEngine::begin(Adafruit_SSD1306 *display, ChronosESP32 *watch, BuzzerEngine *buzzer)
+void MenuEngine::begin(Adafruit_SH1106G *display, ChronosESP32 *watch, BuzzerEngine *buzzer)
 {
     _display = display;
     _watch = watch;
     _buzzer = buzzer;
     loadPrefs();
 
-    // Apply the persisted settings immediately at boot so a rotation/buzzer/
-    // volume choice made in the menu survives a power cycle without
-    // recompiling.
     if (_buzzer)
     {
         _buzzer->setEnabled(_soundMode >= 1);
@@ -24,14 +21,12 @@ void MenuEngine::begin(Adafruit_SSD1306 *display, ChronosESP32 *watch, BuzzerEng
 void MenuEngine::loadPrefs()
 {
     _prefs.begin(SETTINGS_NAMESPACE, false);
-    // "snd" replaced the older on/off "buz" flag; carry an old setting over
-    // once so nobody's mute choice is lost on upgrade.
     _soundMode = _prefs.getUChar("snd", 255);
     if (_soundMode > 2)
         _soundMode = _prefs.getBool("buz", true) ? 2 : 0;
     _oledRotation = _prefs.getUChar("rot", OLED_ROTATION);
     if (_oledRotation != 0 && _oledRotation != 2)
-        _oledRotation = OLED_ROTATION; // guard against garbage/first-run NVS
+        _oledRotation = OLED_ROTATION;
     _volumeLevel = _prefs.getUChar("vol", 1);
     if (_volumeLevel > 2)
         _volumeLevel = 1;
@@ -65,7 +60,7 @@ void MenuEngine::activate()
     switch (_selected)
     {
     case MENU_BUZZER:
-        _soundMode = (_soundMode + 1) % 3; // OFF -> ALRT -> ALL -> OFF
+        _soundMode = (_soundMode + 1) % 3;
         if (_buzzer)
         {
             _buzzer->setEnabled(_soundMode >= 1);
@@ -92,9 +87,7 @@ void MenuEngine::activate()
     case MENU_RESET_PAIRING:
         if (_watch)
         {
-            // Drop the current BLE connection/advertising and start fresh -
-            // useful if the phone's Chronos app has a stale pairing entry.
-            _watch->stop(false); // keep saved app-side data (name/settings)
+            _watch->stop(false);
             _watch->begin();
         }
         setStatus("Reset");
@@ -110,10 +103,6 @@ void MenuEngine::activate()
 
     _prefs.end();
 
-    // Every action gets a confirmation click (Volume plays it at the NEW
-    // level so you hear what you picked). Silent: opening the info panel
-    // (nothing was "done"), and switching Sound to OFF (it would be muted
-    // anyway).
     if (_buzzer)
     {
         bool silent = (_selected == MENU_DEVICE_INFO) ||
@@ -126,10 +115,10 @@ void MenuEngine::activate()
 void MenuEngine::drawDeviceInfo()
 {
     _display->setTextSize(1);
-    _display->setTextColor(SSD1306_WHITE);
+    _display->setTextColor(SH110X_WHITE);
     _display->setCursor(0, 0);
     _display->print("DEVICE INFO");
-    _display->drawFastHLine(0, 10, OLED_WIDTH, SSD1306_WHITE);
+    _display->drawFastHLine(0, 10, OLED_WIDTH, SH110X_WHITE);
 
     _display->setCursor(0, 13);
     _display->print("Name: ");
@@ -161,10 +150,10 @@ void MenuEngine::draw()
     }
 
     _display->setTextSize(1);
-    _display->setTextColor(SSD1306_WHITE);
+    _display->setTextColor(SH110X_WHITE);
     _display->setCursor(0, 0);
     _display->print("MENU");
-    _display->drawFastHLine(0, 9, OLED_WIDTH, SSD1306_WHITE);
+    _display->drawFastHLine(0, 9, OLED_WIDTH, SH110X_WHITE);
 
     const char *labels[MENU_COUNT] = {
         "Sound",

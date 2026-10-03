@@ -3,7 +3,7 @@
 #include "text_utils.h"
 #include <qrcode.h>
 
-void ChronosUI::begin(Adafruit_SSD1306 *display, ChronosESP32 *watch, FaceEngine *face, MenuEngine *menu)
+void ChronosUI::begin(Adafruit_SH1106G *display, ChronosESP32 *watch, FaceEngine *face, MenuEngine *menu)
 {
     _display = display;
     _watch = watch;
@@ -51,10 +51,10 @@ void ChronosUI::nextQr()
 void ChronosUI::header(const char *title)
 {
     _display->setTextSize(1);
-    _display->setTextColor(SSD1306_WHITE);
+    _display->setTextColor(SH110X_WHITE);
     _display->setCursor(0, 0);
     _display->print(title);
-    _display->drawFastHLine(0, 10, OLED_WIDTH, SSD1306_WHITE);
+    _display->drawFastHLine(0, 10, OLED_WIDTH, SH110X_WHITE);
 }
 
 void ChronosUI::drawTime()
@@ -185,7 +185,7 @@ void ChronosUI::drawNavigation()
                 int byteIndex = (y * 48 + x) / 8;
                 int bitPos = 7 - (x % 8);
                 if ((nav.icon[byteIndex] >> bitPos) & 0x01)
-                    _display->drawPixel(x, 14 + y, SSD1306_WHITE);
+                    _display->drawPixel(x, 14 + y, SH110X_WHITE);
             }
         }
     }
@@ -250,18 +250,18 @@ void ChronosUI::drawPhone()
     const int cx = OLED_WIDTH / 2;
     const int cy = 25;
     const int r = 20;
-    _display->drawCircle(cx, cy, r, SSD1306_WHITE);
-    _display->drawCircle(cx, cy, r - 1, SSD1306_WHITE); // 2px-thick ring
+    _display->drawCircle(cx, cy, r, SH110X_WHITE);
+    _display->drawCircle(cx, cy, r - 1, SH110X_WHITE); // 2px-thick ring
 
     // Checkmark, drawn as two doubled-up strokes for a bit of weight.
     for (int off = 0; off <= 1; off++)
     {
-        _display->drawLine(cx - 10, cy + 2 + off, cx - 3, cy + 9 + off, SSD1306_WHITE);
-        _display->drawLine(cx - 3, cy + 9 + off, cx + 12, cy - 10 + off, SSD1306_WHITE);
+        _display->drawLine(cx - 10, cy + 2 + off, cx - 3, cy + 9 + off, SH110X_WHITE);
+        _display->drawLine(cx - 3, cy + 9 + off, cx + 12, cy - 10 + off, SH110X_WHITE);
     }
 
     _display->setTextSize(1);
-    _display->setTextColor(SSD1306_WHITE);
+    _display->setTextColor(SH110X_WHITE);
     // "Connected" = 9 chars * 6px/char at text size 1 = 54px wide
     _display->setCursor(cx - 27, 52);
     _display->print("Connected");
@@ -270,7 +270,7 @@ void ChronosUI::drawPhone()
 void ChronosUI::drawQr()
 {
     _display->setTextSize(1);
-    _display->setTextColor(SSD1306_WHITE);
+    _display->setTextColor(SH110X_WHITE);
 
     if (_qrCount <= 0)
     {
@@ -317,19 +317,19 @@ void ChronosUI::drawQr()
     // printed QR code (dark squares on a light background) - what phone
     // camera scanners are tuned to expect - instead of the other way
     // around. The plain white margin around it doubles as the quiet zone.
-    _display->fillRect(0, 0, OLED_WIDTH, OLED_HEIGHT, SSD1306_WHITE);
+    _display->fillRect(0, 0, OLED_WIDTH, OLED_HEIGHT, SH110X_WHITE);
     for (uint8_t y = 0; y < qrcode.size; y++)
     {
         for (uint8_t x = 0; x < qrcode.size; x++)
         {
             if (qrcode_getModule(&qrcode, x, y))
-                _display->fillRect(originX + x * scale, originY + y * scale, scale, scale, SSD1306_BLACK);
+                _display->fillRect(originX + x * scale, originY + y * scale, scale, scale, SH110X_BLACK);
         }
     }
 
     if (_qrCount > 1)
     {
-        _display->setTextColor(SSD1306_BLACK); // background here is now white
+        _display->setTextColor(SH110X_BLACK); // background here is now white
         _display->setCursor(2, 2);
         _display->print(String(_qrIndex + 1) + "/" + String(_qrCount));
     }

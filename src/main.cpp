@@ -42,7 +42,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_SH110X.h>
 #include <ChronosESP32.h>
 
 #include "dirgamochi_config.h"
@@ -56,7 +56,7 @@
 #include "buzzer_engine.h"
 #include "menu_engine.h"
 
-Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
+Adafruit_SH1106G display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
 ChronosESP32 watch; // use the fully initialized default constructor
 FaceEngine face;             // procedural expressions (events, moods, quiet hours)
 SpriteFaceEngine spriteFace; // bitmap idle-mood animations (plain idle only)
@@ -374,7 +374,7 @@ void setup()
     Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
     Wire.setClock(OLED_I2C_CLOCK);
 
-    oledReady = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
+    oledReady = display.begin(OLED_ADDRESS, true);
 
     // Bring up the speaker (I2S, TX-only unless ENABLE_AUDIO=1) before the
     // beep sequencer that drives it, then load persisted settings (buzzer
@@ -390,7 +390,7 @@ void setup()
     if (oledReady)
     {
         display.clearDisplay();
-        display.setTextColor(SSD1306_WHITE);
+        display.setTextColor(SH110X_WHITE);
         display.setTextSize(1);
         display.setCursor(0, 0);
         display.println(DIRGA_FW_NAME);
@@ -402,7 +402,7 @@ void setup()
     }
     else
     {
-        Serial.println("[Dirgamochi] OLED not found at 0x3C - continuing without display");
+        Serial.println("OLED not found at 0x3C - continuing without display");
     }
 
     watch.setConnectionCallback(onConnectionChange);
@@ -626,7 +626,7 @@ void loop()
                 if (!sleepLogoDrawn)
                 {
                     display.clearDisplay();
-                    display.drawBitmap(0, 0, sleepLogoBitmap, SLEEP_LOGO_WIDTH, SLEEP_LOGO_HEIGHT, SSD1306_WHITE);
+                    display.drawBitmap(0, 0, sleepLogoBitmap, SLEEP_LOGO_WIDTH, SLEEP_LOGO_HEIGHT, SH110X_WHITE);
                     display.display();
                     sleepLogoDrawn = true;
                 }

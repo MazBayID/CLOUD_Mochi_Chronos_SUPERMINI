@@ -20,7 +20,7 @@ float FaceEngine::easeInOut(float t)
     return t * t * (3.0f - 2.0f * t);
 }
 
-void FaceEngine::begin(Adafruit_SSD1306 *display)
+void FaceEngine::begin(Adafruit_SH1106G *display)
 {
     _display = display;
     if (!_seeded)
@@ -137,7 +137,7 @@ void FaceEngine::update(bool bleConnected)
     }
 }
 
-void FaceEngine::fillEllipse(Adafruit_SSD1306 *d, int cx, int cy, int rx, int ry, uint16_t color)
+void FaceEngine::fillEllipse(Adafruit_SH1106G *d, int cx, int cy, int rx, int ry, uint16_t color)
 {
     if (rx <= 0 || ry <= 0)
         return;
@@ -148,7 +148,7 @@ void FaceEngine::fillEllipse(Adafruit_SSD1306 *d, int cx, int cy, int rx, int ry
     }
 }
 
-void FaceEngine::drawArc(Adafruit_SSD1306 *d, int cx, int cy, int r, float startDeg, float endDeg, uint16_t color, int thickness)
+void FaceEngine::drawArc(Adafruit_SH1106G *d, int cx, int cy, int r, float startDeg, float endDeg, uint16_t color, int thickness)
 {
     for (float ang = startDeg; ang <= endDeg; ang += 4.0f)
     {
@@ -165,7 +165,7 @@ void FaceEngine::drawArc(Adafruit_SSD1306 *d, int cx, int cy, int r, float start
 
 void FaceEngine::drawEye(int cx, int cy, int r, float openness, FaceExpression expr, bool leftEye)
 {
-    Adafruit_SSD1306 *d = _display;
+    Adafruit_SH1106G *d = _display;
     int lookDX = (int)(_lookX * (r * 0.25f));
     int lookDY = (int)(_lookY * (r * 0.2f));
 
@@ -174,17 +174,17 @@ void FaceEngine::drawEye(int cx, int cy, int r, float openness, FaceExpression e
     case FACE_HAPPY:
     {
         // closed happy eye: upward smiling arc "^"
-        drawArc(d, cx, cy + 4, r - 2, 200.0f, 340.0f, SSD1306_WHITE, 3);
+        drawArc(d, cx, cy + 4, r - 2, 200.0f, 340.0f, SH110X_WHITE, 3);
         break;
     }
     case FACE_SLEEPY:
     {
         // half-lidded: flat-topped ellipse (lower half of a circle)
         int ry = r / 2;
-        fillEllipse(d, cx, cy + r / 3, r, ry, SSD1306_WHITE);
+        fillEllipse(d, cx, cy + r / 3, r, ry, SH110X_WHITE);
         // eyelid covers top half (erase) then redraw a clean lid line
-        d->fillRect(cx - r - 1, cy - r, (r * 2) + 2, r, SSD1306_BLACK);
-        d->drawFastHLine(cx - r, cy - 1, r * 2, SSD1306_WHITE);
+        d->fillRect(cx - r - 1, cy - r, (r * 2) + 2, r, SH110X_BLACK);
+        d->drawFastHLine(cx - r, cy - 1, r * 2, SH110X_WHITE);
         break;
     }
     case FACE_ANGRY:
@@ -193,23 +193,23 @@ void FaceEngine::drawEye(int cx, int cy, int r, float openness, FaceExpression e
         int rr = (int)(r * 0.85f * openness);
         if (rr < 2)
             rr = 2;
-        d->drawCircle(cx, cy, rr, SSD1306_WHITE);
-        d->fillCircle(cx + lookDX, cy + lookDY, max(2, rr - 6), SSD1306_WHITE);
-        d->fillCircle(cx + lookDX - 1, cy + lookDY - 2, min(2, HIGHLIGHT_R - 2), SSD1306_BLACK);
+        d->drawCircle(cx, cy, rr, SH110X_WHITE);
+        d->fillCircle(cx + lookDX, cy + lookDY, max(2, rr - 6), SH110X_WHITE);
+        d->fillCircle(cx + lookDX - 1, cy + lookDY - 2, min(2, HIGHLIGHT_R - 2), SH110X_BLACK);
         // eyebrow: angled line, slanting down toward the nose
         if (leftEye)
-            d->drawLine(cx - r, cy - r - 2, cx + r / 2, cy - r + 6, SSD1306_WHITE);
+            d->drawLine(cx - r, cy - r - 2, cx + r / 2, cy - r + 6, SH110X_WHITE);
         else
-            d->drawLine(cx + r, cy - r - 2, cx - r / 2, cy - r + 6, SSD1306_WHITE);
+            d->drawLine(cx + r, cy - r - 2, cx - r / 2, cy - r + 6, SH110X_WHITE);
         return; // custom drawn, skip generic highlight below
     }
     case FACE_SURPRISED:
     {
         int rr = (int)(r * 1.05f);
-        d->drawCircle(cx, cy, rr, SSD1306_WHITE);
-        d->drawCircle(cx, cy, rr - 1, SSD1306_WHITE);
-        d->fillCircle(cx + lookDX, cy + lookDY, rr / 2, SSD1306_WHITE);
-        d->fillCircle(cx + lookDX - 2, cy + lookDY - 2, 2, SSD1306_BLACK);
+        d->drawCircle(cx, cy, rr, SH110X_WHITE);
+        d->drawCircle(cx, cy, rr - 1, SH110X_WHITE);
+        d->fillCircle(cx + lookDX, cy + lookDY, rr / 2, SH110X_WHITE);
+        d->fillCircle(cx + lookDX - 2, cy + lookDY - 2, 2, SH110X_BLACK);
         return;
     }
     case FACE_CUTE:
@@ -218,16 +218,16 @@ void FaceEngine::drawEye(int cx, int cy, int r, float openness, FaceExpression e
         bool winkThis = leftEye; // left eye winks, right eye normal
         if (winkThis)
         {
-            drawArc(d, cx, cy + 4, r - 2, 200.0f, 340.0f, SSD1306_WHITE, 3);
+            drawArc(d, cx, cy + 4, r - 2, 200.0f, 340.0f, SH110X_WHITE, 3);
         }
         else
         {
             int rr = (int)(r * openness);
             if (rr < 2)
                 rr = 2;
-            d->drawCircle(cx, cy, rr, SSD1306_WHITE);
-            d->fillCircle(cx + lookDX, cy + lookDY, max(2, rr - 6), SSD1306_WHITE);
-            d->fillCircle(cx + lookDX - 1, cy + lookDY - 2, min(2, HIGHLIGHT_R - 2), SSD1306_BLACK);
+            d->drawCircle(cx, cy, rr, SH110X_WHITE);
+            d->fillCircle(cx + lookDX, cy + lookDY, max(2, rr - 6), SH110X_WHITE);
+            d->fillCircle(cx + lookDX - 1, cy + lookDY - 2, min(2, HIGHLIGHT_R - 2), SH110X_BLACK);
         }
         return;
     }
@@ -237,9 +237,9 @@ void FaceEngine::drawEye(int cx, int cy, int r, float openness, FaceExpression e
         int rr = (int)(r * openness);
         if (rr < 2)
             rr = 2;
-        d->drawCircle(cx, cy, rr, SSD1306_WHITE);
-        d->fillCircle(cx + lookDX, cy + lookDY, max(2, rr - 6), SSD1306_WHITE);
-        d->fillCircle(cx + lookDX - 1, cy + lookDY - 2, min(2, HIGHLIGHT_R - 2), SSD1306_BLACK);
+        d->drawCircle(cx, cy, rr, SH110X_WHITE);
+        d->fillCircle(cx + lookDX, cy + lookDY, max(2, rr - 6), SH110X_WHITE);
+        d->fillCircle(cx + lookDX - 1, cy + lookDY - 2, min(2, HIGHLIGHT_R - 2), SH110X_BLACK);
         break;
     }
     }
@@ -247,32 +247,32 @@ void FaceEngine::drawEye(int cx, int cy, int r, float openness, FaceExpression e
 
 void FaceEngine::drawMouth(FaceExpression expr)
 {
-    Adafruit_SSD1306 *d = _display;
+    Adafruit_SH1106G *d = _display;
     int cx = (EYE_LX + EYE_RX) / 2;
     int cy = 52;
 
     switch (expr)
     {
     case FACE_HAPPY:
-        drawArc(d, cx, cy - 6, 10, 20.0f, 160.0f, SSD1306_WHITE, 2);
+        drawArc(d, cx, cy - 6, 10, 20.0f, 160.0f, SH110X_WHITE, 2);
         break;
     case FACE_SLEEPY:
-        d->drawFastHLine(cx - 5, cy, 10, SSD1306_WHITE);
+        d->drawFastHLine(cx - 5, cy, 10, SH110X_WHITE);
         break;
     case FACE_SURPRISED:
-        d->drawCircle(cx, cy, 5, SSD1306_WHITE);
+        d->drawCircle(cx, cy, 5, SH110X_WHITE);
         break;
     case FACE_ANGRY:
-        drawArc(d, cx, cy + 10, 10, 200.0f, 340.0f, SSD1306_WHITE, 2);
+        drawArc(d, cx, cy + 10, 10, 200.0f, 340.0f, SH110X_WHITE, 2);
         break;
     case FACE_CUTE:
-        drawArc(d, cx, cy - 6, 9, 20.0f, 160.0f, SSD1306_WHITE, 2);
-        d->drawFastHLine(cx - 2, cy + 2, 4, SSD1306_WHITE);
+        drawArc(d, cx, cy - 6, 9, 20.0f, 160.0f, SH110X_WHITE, 2);
+        d->drawFastHLine(cx - 2, cy + 2, 4, SH110X_WHITE);
         break;
     case FACE_NORMAL:
     default:
         // small gentle "n" shaped mouth, like the reference photos
-        drawArc(d, cx, cy - 4, 5, 200.0f, 340.0f, SSD1306_WHITE, 1);
+        drawArc(d, cx, cy - 4, 5, 200.0f, 340.0f, SH110X_WHITE, 1);
         break;
     }
 }
@@ -283,9 +283,9 @@ void FaceEngine::drawConnIcon(bool connected)
     int cx = 122;
     int cy = 4;
     if (connected)
-        _display->fillCircle(cx, cy, 3, SSD1306_WHITE);
+        _display->fillCircle(cx, cy, 3, SH110X_WHITE);
     else
-        _display->drawCircle(cx, cy, 3, SSD1306_WHITE);
+        _display->drawCircle(cx, cy, 3, SH110X_WHITE);
 }
 
 void FaceEngine::draw()

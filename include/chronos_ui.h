@@ -1,7 +1,7 @@
 #ifndef CHRONOS_UI_H
 #define CHRONOS_UI_H
 
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_SH110X.h>
 #include <ChronosESP32.h>
 #include "face_engine.h"
 #include "menu_engine.h"
@@ -16,32 +16,28 @@ enum UiScreen
     SCR_MUSIC,
     SCR_PHONE,
     SCR_QR,
-    SCR_MENU, // not part of the NEXT cycle - only entered via a long-press
-    SCR_COUNT // keep last
+    SCR_MENU,
+    SCR_COUNT
 };
 
 class ChronosUI
 {
 public:
-    void begin(Adafruit_SSD1306 *display, ChronosESP32 *watch, FaceEngine *face, MenuEngine *menu);
+    void begin(Adafruit_SH1106G *display, ChronosESP32 *watch, FaceEngine *face, MenuEngine *menu);
 
-    void nextScreen();       // NEXT short press - cycles the glanceable screens
-    void backToFace();       // MODE short press
-    void goTo(UiScreen s);   // jump directly to a screen (e.g. TALK -> SCR_PHONE)
-    void openMenu();         // NEXT long press - opens the settings menu
+    void nextScreen();
+    void backToFace();
+    void goTo(UiScreen s);
+    void openMenu();
     UiScreen current() const { return _screen; }
 
-    // draws the current screen (except SCR_FACE, which FaceEngine owns)
-    // call every loop(); internally throttled
     void update();
 
-    // let main.cpp tell the QR screen how many links Chronos has sent, and
-    // which one to show (cycled with TALK while the QR screen is open)
     void setQrCount(int count) { _qrCount = count; }
     void nextQr();
 
 private:
-    Adafruit_SSD1306 *_display = nullptr;
+    Adafruit_SH1106G *_display = nullptr;
     ChronosESP32 *_watch = nullptr;
     FaceEngine *_face = nullptr;
     MenuEngine *_menu = nullptr;
