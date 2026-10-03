@@ -4,7 +4,7 @@ A DasaiMochi-style companion firmware for the **ESP32-C3 Super Mini**, with
 original round "kawaii" eyes (no rectangular DasaiMochi eyes) and a BLE data
 link to the **Chronos** phone app, using [fbiego/chronos-esp32](https://github.com/fbiego/chronos-esp32).
 
-This Mochi can connected with Chronos app. Chronos supplies time,
+This Mochi can connected with Chronos app by fBiego. Chronos supplies time,
 Chronos app: https://play.google.com/store/apps/details?id=com.fbiego.chronos&hl=id&referrer=utm_source%3Dgoogle%26utm_medium%3Dorganic%26utm_term%3Dlink+playstore+chronos&pcampaignid=APPU_1_oMq7at_5IvKLjuMP6uSEyAI
 Chronos website: https://chronos.ke
 weather, notifications, navigation, music and phone-battery data over BLE;
