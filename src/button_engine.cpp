@@ -4,7 +4,7 @@
 void TouchButton::begin(uint8_t pin)
 {
     _pin = pin;
-    pinMode(_pin, INPUT); // TTP223 has its own push-pull output, no internal pull needed
+    pinMode(_pin, INPUT_PULLDOWN); // push button: internal pull-down holds pin LOW when released
     _lastRaw = digitalRead(_pin) == HIGH;
     _stableState = _lastRaw;
     _lastChangeMs = millis();
@@ -28,13 +28,11 @@ ButtonEvent TouchButton::update()
         _stableState = raw;
         if (_stableState)
         {
-            // just pressed
             _pressStartMs = now;
             _longFired = false;
         }
         else
         {
-            // just released -> short press only if long wasn't already fired
             if (!_longFired)
             {
                 ev = BTN_SHORT_PRESS;
@@ -42,7 +40,6 @@ ButtonEvent TouchButton::update()
         }
     }
 
-    // fire long-press once while still held
     if (_stableState && !_longFired && (now - _pressStartMs) >= BTN_LONGPRESS_MS)
     {
         _longFired = true;
@@ -50,4 +47,4 @@ ButtonEvent TouchButton::update()
     }
 
     return ev;
-}
+}   
